@@ -5,22 +5,54 @@ from pyproj import Transformer
 import math as m
 
 
-def get_field_value(row, field_names):
+def get_field_value(row, field_names, special=None):
     """
     Try to get the value of the first non-null field from the list.
+    if the field is not found, return False.
+    find if the structure is detailed by checking the field value
     """
     for field in field_names:
         try:
             value = row[field]
             # If the value is a string, return it
             if isinstance(value, str):
+                # Check if special is a None, if not, check if the value is not in the list to determine if it is special
+                if special is not None:
+                    if special or value not in [
+                        " ",
+                        "roof",
+                        "no",
+                        "building",
+                        "yes",
+                        "0",
+                    ]:
+                        return value, True
+                    else:
+                        return value, False
                 return value
             elif value is not None and not m.isnan(value):
+                # Same check
+                if special is not None:
+                    if special or value not in [
+                        " ",
+                        "roof",
+                        "no",
+                        "building",
+                        "yes",
+                        "0",
+                    ]:
+                        return value, True
+                    else:
+                        return value, False
                 # If the value is not None and not nan, return it
                 return value
         except:
             pass
-    return False
+
+    if special is not None:
+        return False, special
+    else:
+        return False
 
 
 def get_height_value(value):
@@ -60,51 +92,65 @@ def projection(coordinations, string):
     return projected_coordinations
 
 
-def Load_Geo_File(json_path, projection_string=None):
+def Load_Geo_File(json_path, debugger=False, projection_string=None):
     # meter2feet_google = 3.2808399
     meter2feet_BMS = 3.27998
 
     # Load the GeoJSON file
     geojson_file = json_path
     gdf = gpd.read_file(geojson_file)
+    if debugger:
+        print("********* Fetching GeoData *********")
 
     # Create a list to store the extracted information for each feature and center list of each feature
     feature_list = []
     center_list = []
 
+    # count detailed features
+    detailed_features = []
+    special = False
+
     # Extract the important values along with all coordinates
     for index, row in gdf.iterrows():
         name = get_field_value(row, ["name:en", "name:int", "name"])
         geom_type = row["geometry"].geom_type
-        building = get_field_value(row, ["building"])
-        building_levels = get_field_value(row, ["building:levels"])
-        height = get_field_value(row, ["height"])
-        amenity = get_field_value(row, ["amenity"])
-        barrier = get_field_value(row, ["barrier"])
-        bridge = get_field_value(row, ["bridge"])
-        diplomatic = get_field_value(row, ["diplomatic"])
-        leisure = get_field_value(row, ["leisure"])
-        man_made = get_field_value(row, ["man_made"])
-        military = get_field_value(row, ["military"])
-        office = get_field_value(row, ["office"])
-        power = get_field_value(row, ["power"])
-        religion = get_field_value(row, ["religion"])
-        sport = get_field_value(row, ["sport"])
+        building, special = get_field_value(row, ["building"], special)
+        building_levels, special = get_field_value(row, ["building:levels"], special)
+        height, special = get_field_value(row, ["height"], special)
+        aeroway, special = get_field_value(row, ["aeroway"], special)
+        amenity, special = get_field_value(row, ["amenity"], special)
+        barrier, special = get_field_value(row, ["barrier"], special)
+        bridge, special = get_field_value(row, ["bridge"], special)
+        diplomatic, special = get_field_value(row, ["diplomatic"], special)
+        leisure, special = get_field_value(row, ["leisure"], special)
+        man_made, special = get_field_value(row, ["man_made"], special)
+        military, special = get_field_value(row, ["military"], special)
+        office, special = get_field_value(row, ["office"], special)
+        power, special = get_field_value(row, ["power"], special)
+        religion, special = get_field_value(row, ["religion"], special)
+        service, special = get_field_value(row, ["service"], special)
+        sport, special = get_field_value(row, ["sport"], special)
+        tower, special = get_field_value(row, ["tower"], special)
 
-        if geom_type == "MultiPolygon":
+        if special:
+            detailed_features.append(1)
+        else:
+            detailed_features.append(0)
+        special = False
+
+        # Handle both "Polygon" and "MultiPolygon" geometries
+        if geom_type in ["Polygon", "MultiPolygon"]:
+            polygons = (
+                [row["geometry"]] if geom_type == "Polygon" else row["geometry"].geoms
+            )
             coordinates = []
-            for polygon in row["geometry"].geoms:
+            for polygon in polygons:
                 exterior_coords = np.array(polygon.exterior.coords)
                 # Check if projection_string is available if so, apply projection and continue as planned
                 if projection_string and projection_string != "":
                     exterior_coords = projection(exterior_coords, projection_string)
                 coordinates.append(exterior_coords)
             Real_center, rotation_angle, side_lengths = fitted_features(coordinates[0])
-            # add to center list for later avarage center calculation
-            center_list.append(Real_center)
-        elif geom_type == "Polygon":
-            coordinates = np.array(row["geometry"].exterior.coords)
-            Real_center, rotation_angle, side_lengths = fitted_features(coordinates)
             # add to center list for later average center calculation
             center_list.append(Real_center)
         else:
@@ -131,6 +177,7 @@ def Load_Geo_File(json_path, projection_string=None):
                 "type": geom_type,
                 "building_levels": building_levels,
                 "height": height,
+                "aeroway": aeroway,
                 "amenity": amenity,
                 "barrier": barrier,
                 "bridge": bridge,
@@ -142,9 +189,15 @@ def Load_Geo_File(json_path, projection_string=None):
                 "office": office,
                 "power": power,
                 "religion": religion,
+                "service": service,
                 "sport": sport,
+                "tower": tower,
             }
             feature_list.append(feature_data)
+            if debugger:
+                print(
+                    f"Structure number #{index},sized {round(side_bigger * meter2feet_BMS,3)} x {round(side_smaller * meter2feet_BMS,3)} x {round(height,3)} fetched "
+                )
 
     ### Old Way
     # # convert into falcon coordination = coor/1000, x,y = [0,1] -> xxx,yyy = [-1640,+1640]
@@ -162,7 +215,9 @@ def Load_Geo_File(json_path, projection_string=None):
     center_related = center_list - main_center
 
     # Set Center from feet to Km(1000m)
-    main_center = main_center / (meter2feet_BMS * 1000)
+    main_center = main_center / (meter2feet_BMS)
+    if projection_string and projection_string != "":
+        main_center = main_center / 1000
 
     # Calculate radius and angle (polar space) for each point with falcon coordination
     Radius = np.sqrt(center_related[:, 0] ** 2 + center_related[:, 1] ** 2)
@@ -201,9 +256,10 @@ def Load_Geo_File(json_path, projection_string=None):
         "Location Angle (Deg)",
         "XXX Cords",
         "YYY Cords",
+        "Detailed Structure",
     ]
 
-    calculated_data = np.zeros((len(feature_list), 7))
+    calculated_data = np.zeros((len(feature_list), 8))
     calculated_data[:, 0] = np.arange(len(feature_list)).reshape(
         -1
     )  # all Geo data arrange in dictionary
@@ -213,12 +269,17 @@ def Load_Geo_File(json_path, projection_string=None):
     calculated_data[:, 2] = np.array(sizes_list).reshape(
         -1
     )  # Sizes of all the buildings
+
     calculated_data[:, 3] = Radius  # Radius compare to the avg center of each building
     calculated_data[:, 4] = angles_deg  # Angle to the avg center of each building
     calculated_data[:, 5:7] = center_related  # Location in 2 columns, (XXX,YYY)
+    calculated_data[:, 7] = np.array(detailed_features).reshape(
+        -1
+    )  # Detailed structures
 
     calculated_data_with_Names = np.core.records.fromarrays(
         calculated_data.transpose(), names=column_names
     )
-
+    if debugger:
+        print("********* GeoData has been fetched successfully *********")
     return feature_list, calculated_data_with_Names, main_center

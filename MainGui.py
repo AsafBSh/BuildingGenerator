@@ -13,11 +13,14 @@ import winreg
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import random as rand
-from functools import partial
 
 # functions from Code
 from MainCode import Load_Db
 import Load_Geo_File as geo
+import ValuesDictionary
+import Restrictions
+import OSMLegend
+import InternalConsole
 from Database import GenerateDB
 from MainCode import (
     Assign_features_accuratly,
@@ -31,13 +34,14 @@ from MainCode import Show_Selected_Features_2D, Show_Selected_Features_3D
 class MainPage(tk.Tk):
     def __init__(self, *args, **kwargs):
         # Initiate veriables
-        self.ASSETS_PATH = Path(__file__).parent / Path(r"Assets")
-        # self.title("Buildings Generator for Falcon BMS v0.9")
+        # self.ASSETS_PATH = Path(__file__).parent / Path(r"Assets")
+        self.ASSETS_PATH = Path(r"Assets")
 
         tk.Tk.__init__(self, *args, **kwargs)
         # Set Geometry of the page
         self.geometry("1152x720")
         self.configure(bg="#FFFFFF")
+        self.resizable(False, False)
         # Set Shared data vatiables
         self.shared_data = {
             "CTpath": tk.StringVar(),
@@ -55,6 +59,7 @@ class MainPage(tk.Tk):
             "projection_path": tk.StringVar(),
             "projection_string": tk.StringVar(),
             "Startup": tk.StringVar(),
+            "debugger": tk.BooleanVar(),
         }
         self.shared_data["BMS_version"].set("-")
         self.shared_data["Theater"].set("-")
@@ -62,6 +67,7 @@ class MainPage(tk.Tk):
         self.shared_data["projection_path"].set("No Projection file selected")
         self.shared_data["backup_CTpath"].set("No CT file selected")
         self.shared_data["Geopath"].set("No GeoJson file selected")
+        self.shared_data["debugger"] = False
 
         self.frames = {}
         for F in (DashboardPage, DatabasePage, GeoDataPage, OperationPage):
@@ -74,8 +80,9 @@ class MainPage(tk.Tk):
             frame.grid(row=0, column=0, sticky="nsew")
 
         # Set Name and Icon
-        self.title("Building Generator v0.9b")
-        self.iconbitmap("icon_64.ico")
+        self.title("Building Generator v0.95b")
+        # icon_path = os.path.abspath("icon_128.ico")
+        self.iconbitmap("icon_128.ico")
 
         # Select Dash as main front page
         self.show_frame("DashboardPage")
@@ -123,7 +130,6 @@ class MainPage(tk.Tk):
             else:
                 self.shared_data["BMS_Databse"] = np.array([])
 
-
                 for row in self.frames["DatabasePage"].ModelsTable.get_children():
                     self.frames["DatabasePage"].ModelsTable.delete(row)
 
@@ -145,7 +151,7 @@ class MainPage(tk.Tk):
             command=self.save_config_file,
             text_color="#000000",
         )
-        self.SaveSettings.grid(row=0, column=1, padx=10, pady=30)
+        self.SaveSettings.grid(row=0, column=1, padx=10, pady=10)
 
         self.LoadSettings = Ctk.CTkButton(
             Settings,
@@ -159,7 +165,7 @@ class MainPage(tk.Tk):
             text_color="#000000",
             command=self.load_config,
         )
-        self.LoadSettings.grid(row=0, column=2, padx=10, pady=30)
+        self.LoadSettings.grid(row=0, column=2, padx=10, pady=10)
 
         self.Auto_Load = Ctk.CTkCheckBox(
             Settings,
@@ -173,7 +179,35 @@ class MainPage(tk.Tk):
             command=self.startup_selection_checkbox,
             fg_color="#8DBBE7",
         )
-        self.Auto_Load.grid(row=0, column=0, padx=10, pady=30)
+        self.Auto_Load.grid(row=0, column=0, padx=10, pady=10)
+
+        self.debbuger = Ctk.CTkCheckBox(
+            Settings,
+            checkbox_height=18,
+            checkbox_width=18,
+            text="Debbuger",
+            onvalue=True,
+            offvalue=False,
+            text_color="#565454",
+            width=30,
+            command=self.change_debugger_state,
+            fg_color="#8DBBE7",
+        )
+        self.debbuger.grid(row=1, column=0, padx=10, pady=10)
+
+        self.console_window = Ctk.CTkButton(
+            Settings,
+            text="Open Console Window",
+            fg_color="#A1B9D0",
+            bg_color="#A1B9D0",
+            height=33,
+            width=354,
+            corner_radius=5,
+            hover_color="#7A92A9",
+            text_color="#000000",
+            command=self.open_console_window,
+        )
+        self.console_window.grid(row=1, column=1, columnspan=2, padx=10, pady=10)
 
         # Set Startup state based on the shared data value
         if self.shared_data["Startup"].get():
@@ -181,19 +215,29 @@ class MainPage(tk.Tk):
         else:
             self.Auto_Load.deselect()
 
-        # Make the window always appear on top
-        Settings.attributes("-topmost", 1)
-
         # Bind the window's "destroy" event to a function that enables the button
         Settings.bind("<Destroy>", self.enable_Settings_button)
+
+    def change_debugger_state(self):
+        debugger_value = self.debbuger.get()
+        if debugger_value:
+            print("Debugger Activated")
+            self.shared_data["debugger"] = True
+        elif not debugger_value:
+            print("Debugger Deactivated")
+            self.shared_data["debugger"] = False
+
+    def open_console_window(self):
+        """Opens a new console window"""
+        InternalConsole.InternalConsole()
 
     def startup_selection_checkbox(self):
         """Change of checkbox in the settings window will set values to the shared value of startup
         It will load the config file, and change the value on the fly"""
 
         # Load Config file
-        filename = "config.json"
-        filepath = Path(__file__).parent / Path(filename)
+        filename, filepath = "config.json", Path(r"config.json")
+        # filepath = Path(__file__).parent / Path(filename)
         if os.path.isfile(filepath):
             with open(filename, "r") as f:
                 loaded_data = json.load(f)
@@ -222,8 +266,8 @@ class MainPage(tk.Tk):
 
     def save_config_file(self):
         """Check if Configuration file is exists, and Save it when "save" button is clicked"""
-        filename = "config.json"
-        filepath = Path(__file__).parent / Path(filename)
+        filepath = Path(r"config.json")
+        # filepath = Path(__file__).parent / Path(filename)
         if os.path.isfile(filepath):
             result = messagebox.askyesno(
                 "Override",
@@ -254,9 +298,6 @@ class MainPage(tk.Tk):
                     "textbox_Amount_random": self.frames[
                         "OperationPage"
                     ].textbox_Amount_random.get(),
-                    "switch_Values_random": self.frames[
-                        "OperationPage"
-                    ].switch_Values_random.get(),
                     "textbox_Values_random1": self.frames[
                         "OperationPage"
                     ].textbox_Values_random1.get(),
@@ -275,6 +316,12 @@ class MainPage(tk.Tk):
                     "Fillter_optionmenu": self.frames[
                         "OperationPage"
                     ].Fillter_optionmenu.get(),
+                    "values_geo_optionmenu": self.frames[
+                        "OperationPage"
+                    ].values_geo_optionmenu.get(),
+                    "values_rand_optionmenu": self.frames[
+                        "OperationPage"
+                    ].values_rand_optionmenu.get(),
                     "Selection_optionmenu": self.frames[
                         "OperationPage"
                     ].Selection_optionmenu.get(),
@@ -284,9 +331,6 @@ class MainPage(tk.Tk):
                     "textbox_Amount_geo": self.frames[
                         "OperationPage"
                     ].textbox_Amount_geo.get(),
-                    "switch_Values_geo": self.frames[
-                        "OperationPage"
-                    ].switch_Values_geo.get(),
                     "textbox_Values_geo1": self.frames[
                         "OperationPage"
                     ].textbox_Values_geo1.get(),
@@ -319,8 +363,13 @@ class MainPage(tk.Tk):
                     ].Editor_Extraction_name.get(),
                 }
 
-                with open(filename, "w") as f:
+                with open(filepath, "w") as f:
                     json.dump(settings, f)
+
+                return messagebox.showinfo(
+                    "Saving succeeded",
+                    "The Saving process has been finished successfully",
+                )
 
             else:
                 return messagebox.showwarning(
@@ -329,10 +378,10 @@ class MainPage(tk.Tk):
 
     def load_config(self):
         """Check if Configuration file is exists, and load it when "load" button is clicked"""
-        filename = "config.json"
-        filepath = Path(__file__).parent / Path(filename)
+        filepath = Path(r"config.json")
+        # filepath = Path(__file__).parent / Path(filename)
         if os.path.isfile(filepath):
-            with open(filename, "r") as f:
+            with open(filepath, "r") as f:
                 loaded_data = json.load(f)
 
             self.shared_data["Startup"].set(loaded_data["Startup"])
@@ -351,6 +400,12 @@ class MainPage(tk.Tk):
             self.frames["OperationPage"].Fillter_optionmenu.set(
                 loaded_data["Fillter_optionmenu"]
             )
+            self.frames["OperationPage"].values_geo_optionmenu.set(
+                loaded_data["values_geo_optionmenu"]
+            )
+            self.frames["OperationPage"].values_rand_optionmenu.set(
+                loaded_data["values_rand_optionmenu"]
+            )
             self.frames["OperationPage"].Selection_optionmenu.set(
                 loaded_data["Selection_optionmenu"]
             )
@@ -367,23 +422,29 @@ class MainPage(tk.Tk):
                 loaded_data["segemented_button_graphing2"]
             )
 
+            # Force entries to diasable or enable
+            self.frames["OperationPage"].value_State(
+                self.frames["OperationPage"].values_rand_optionmenu.get(), "rand"
+            )
+            self.frames["OperationPage"].value_State(
+                self.frames["OperationPage"].values_rand_optionmenu.get(), "geo"
+            )
+
             # setting Switches
-            switches = [
-                "switch_Values_random",
+            states = [
                 "switch_Presence_random",
                 "Auto_features_detector",
-                "switch_Values_geo",
                 "switch_Presence_geo",
             ]
-            for switch in switches:
-                if loaded_data[switch]:
-                    self.frames["OperationPage"].__dict__[switch].select()
+
+            for state in states:
+                if loaded_data[state]:
+                    self.frames["OperationPage"].__dict__[state].select()
                 else:
-                    self.frames["OperationPage"].__dict__[switch].deselect()
+                    self.frames["OperationPage"].__dict__[state].deselect()
+
             # Force switches functions
-            self.frames["OperationPage"].switch_value_State_random()
             self.frames["OperationPage"].switch_presence_State_random()
-            self.frames["OperationPage"].switch_value_State_geo()
             self.frames["OperationPage"].switch_presence_State_geo()
 
             # clear and Set Text Boxes
@@ -402,8 +463,11 @@ class MainPage(tk.Tk):
                 "Editor_Extraction_name",
             ]
             for box in text_boxes:
-                self.frames["OperationPage"].__dict__[box].delete(0, tk.END)
-                self.frames["OperationPage"].__dict__[box].insert(0, loaded_data[box])
+                if loaded_data and loaded_data[box] is not None:
+                    self.frames["OperationPage"].__dict__[box].delete(0, tk.END)
+                    self.frames["OperationPage"].__dict__[box].insert(
+                        0, loaded_data[box]
+                    )
             self.frames["OperationPage"].restriction_box.delete("0.0", tk.END)
             self.frames["OperationPage"].restriction_box.insert(
                 tk.END, loaded_data["restriction_box"]
@@ -434,6 +498,7 @@ class MainPage(tk.Tk):
                     self.shared_data["CTpath"].set("No CT file selected")
                     for row in self.frames["DatabasePage"].ModelsTable.get_children():
                         self.frames["DatabasePage"].ModelsTable.delete(row)
+
         else:
             return messagebox.showwarning(
                 "Loading Aborted", "Configuration file couldn't be found."
@@ -441,8 +506,8 @@ class MainPage(tk.Tk):
 
     def startup_definition(self):
         """Check if startup is exist in the configuration file, it its exists"""
-        filename = "config.json"
-        filepath = Path(__file__).parent / Path(filename)
+        filename, filepath = "config.json", Path(r"config.json")
+        # filepath = Path(__file__).parent / Path(filename)
         if os.path.isfile(filepath):
             with open(filename, "r") as f:
                 loaded_data = json.load(f)
@@ -849,7 +914,9 @@ class DashboardPage(tk.Frame):
         self.theater_box.lift()
 
         self.BMSver_box = tk.Label(
-            self, textvariable=self.controller.shared_data["BMS_version"], wraplength=100
+            self,
+            textvariable=self.controller.shared_data["BMS_version"],
+            wraplength=100,
         )
         self.BMSver_box.place(x=555.0, y=663.0, width=112.0, height=28.0)
         self.BMSver_box.lift()
@@ -896,6 +963,11 @@ class DatabasePage(tk.Frame):
     def __init__(self, parent, controller):
         tk.Frame.__init__(self, parent)
         self.controller = controller
+
+        self.Body_font = Ctk.CTkFont(family="Inter", size=15)
+        self.Body_font_Bold = Ctk.CTkFont(family="Inter", size=15, weight="bold")
+        self.button_font = Ctk.CTkFont(family="Inter", size=12)
+        self.dash_font = Ctk.CTkFont(family="Inter", size=10)
 
         self.canvas = Canvas(
             self,
@@ -1063,8 +1135,8 @@ class DatabasePage(tk.Frame):
 
         # Create table of opened features inside a database in DatabasePage
         # Set Frame to the Table
-        ModelsTable_frame = tk.Frame(self, bd=0, relief="solid", width=558, height=420)
-        ModelsTable_frame.place(x=247, y=120)
+        ModelsTable_frame = tk.Frame(self, bd=0, relief="solid", width=558, height=410)
+        ModelsTable_frame.place(x=247, y=110)
         ModelsTable_frame.grid_propagate(0)
 
         # Add a Scrollbar to the Canvas
@@ -1075,8 +1147,7 @@ class DatabasePage(tk.Frame):
         # Create the table
         columns = [
             "ModelNumber",
-            "Domain",
-            "Class",
+            "Name",
             "Type",
             "CTNumber",
             "EntityIdx",
@@ -1099,15 +1170,26 @@ class DatabasePage(tk.Frame):
         # Configure the scroll bar
         vScrollModelsTable.config(command=self.ModelsTable.yview)
 
+        # Set up sorting callback for columns
+        for col in columns:
+            self.ModelsTable.heading(
+                col,
+                text=col,
+                command=lambda c=col: self.sort_column_models(self.ModelsTable, c),
+            )
+
         for col in columns:
             self.ModelsTable.heading(col, text=col)
-            self.ModelsTable.column(col, width=46)
-        for col in range(10):
+            if col == "LengthIdx":
+                self.ModelsTable.column(col, width=30)
+            else:
+                self.ModelsTable.column(col, width=52)
+
             # Insert basic data
             self.ModelsTable.insert(
                 "",
                 "end",
-                values=["-", "-", "-", "-", "-", "-", "-", "-", "-", "-", "-", "-"],
+                values=["-", "-", "-", "-", "-", "-", "-", "-", "-", "-", "-"],
             )
 
         self.image_image_7 = PhotoImage(
@@ -1117,26 +1199,74 @@ class DatabasePage(tk.Frame):
 
         self.canvas.create_rectangle(
             883.0,
-            100.0,
-            1096.9998931884766,
-            101.02392291863521,
+            90.0,
+            1096,
+            91.0,
             fill="#000000",
             outline="",
         )
 
         self.canvas.create_text(
             912.0,
-            80.0,
+            68.0,
             anchor="nw",
             text="Available Databases",
             fill="#000000",
             font=("Inter", 15 * -1),
         )
 
+        # label and Entry for amount of features
+        self.label_features_amount = Ctk.CTkLabel(
+            self, text="Amount of Features:", font=self.button_font, bg_color="#F8F9FB"
+        )
+        self.label_features_amount.place(x=247, y=523)
+        self.textbox_features_amount = Ctk.CTkEntry(
+            self,
+            width=50,
+            height=18,
+            border_color="#D5E3F0",
+            fg_color="#E7E7E7",
+            placeholder_text="0",
+            state="disabled",
+        )
+        self.textbox_features_amount.place(x=368, y=526)
+
+        # label and Entry for average size of the features
+        self.label_features_avg_size = Ctk.CTkLabel(
+            self, text="Average Size:", font=self.button_font, bg_color="#F8F9FB"
+        )
+        self.label_features_avg_size.place(x=446, y=523)
+        self.textbox_features_avg_size = Ctk.CTkEntry(
+            self,
+            width=90,
+            height=18,
+            border_color="#D5E3F0",
+            fg_color="#E7E7E7",
+            placeholder_text="0",
+            state="disabled",
+        )
+        self.textbox_features_avg_size.place(x=531, y=526)
+
+        # label and Entry for average height of the features
+        self.label_features_max_height = Ctk.CTkLabel(
+            self, text="Maximum Height:", font=self.button_font, bg_color="#F8F9FB"
+        )
+        self.label_features_max_height.place(x=649, y=523)
+        self.textbox_features_max_height = Ctk.CTkEntry(
+            self,
+            width=49,
+            height=18,
+            border_color="#D5E3F0",
+            fg_color="#E7E7E7",
+            placeholder_text="0",
+            state="disabled",
+        )
+        self.textbox_features_max_height.place(x=756, y=526)
+
         # Create table of available Databases in DatabasePage
         # Set Frame to the Table
-        DBtable_frame = tk.Frame(self, bd=0, relief="solid", width=215, height=220)
-        DBtable_frame.place(x=883, y=120)
+        DBtable_frame = tk.Frame(self, bd=0, relief="solid", width=215, height=230)
+        DBtable_frame.place(x=883, y=110)
         DBtable_frame.grid_propagate(0)
         # Add a Scrollbar to the Canvas
         vScrollDBTable = tk.Scrollbar(DBtable_frame, orient="vertical")
@@ -1148,7 +1278,7 @@ class DatabasePage(tk.Frame):
             columns=("Idx", "BMS", "Theater"),
             show="headings",
             yscrollcommand=vScrollDBTable.set,
-            height=9,
+            height=10,
         )
         Col_Size = [24, 120, 65]
         for i, col in enumerate(("Idx", "BMS", "Theater")):
@@ -1169,17 +1299,15 @@ class DatabasePage(tk.Frame):
         self.Rectangle_DB_1 = PhotoImage(
             file=str(self.controller.ASSETS_PATH / "Rectangle_DB_1.png")
         )
-        self.canvas.create_image(
-            989.0, 471.0, image=self.Rectangle_DB_1
-        )
+        self.canvas.create_image(989.0, 471.0, image=self.Rectangle_DB_1)
 
         self.canvas.create_rectangle(
-            247.0, 100.0, 805.0, 101.0, fill="#000000", outline=""
+            247.0, 90.0, 805.0, 91.0, fill="#000000", outline=""
         )
 
         self.canvas.create_text(
-            268.0,
-            76.0,
+            280.0,
+            68.0,
             anchor="nw",
             text="List of buildings and features in the selected Database",
             fill="#000000",
@@ -1189,12 +1317,12 @@ class DatabasePage(tk.Frame):
         self.image_image_9 = PhotoImage(
             file=str(self.controller.ASSETS_PATH / "image_Geo_data.png")
         )
-        self.canvas.create_image(895.0, 87.0, image=self.image_image_9)
+        self.canvas.create_image(895.0, 76.0, image=self.image_image_9)
 
         self.image_image_10 = PhotoImage(
             file=str(self.controller.ASSETS_PATH / "image_Data.png")
         )
-        self.canvas.create_image(257.0, 83.0, image=self.image_image_10)
+        self.canvas.create_image(259.0, 75.0, image=self.image_image_10)
 
         self.image_available = PhotoImage(file=self.Check_Availability_Database())
         self.image_11 = self.canvas.create_image(
@@ -1233,10 +1361,27 @@ class DatabasePage(tk.Frame):
         self.theater_box.lift()
 
         self.BMSver_box = tk.Label(
-            self, textvariable=self.controller.shared_data["BMS_version"], wraplength=100
+            self,
+            textvariable=self.controller.shared_data["BMS_version"],
+            wraplength=100,
         )
         self.BMSver_box.place(x=555.0, y=663.0, width=112.0, height=28.0)
         self.BMSver_box.lift()
+
+    def sort_column_models(self, tree, col, reverse=False):
+        """Sort the data in the given column."""
+        if col in ["ModelNumber", "Type", "CTNumber", "EntityIdx"]:
+            data = [(int(tree.set(item, col)), item) for item in tree.get_children("")]
+        elif col in ["Width", "WidthOff", "Length", "LengthOff", "Height", "LengthIdx"]:
+            data = [
+                (float(tree.set(item, col)), item) for item in tree.get_children("")
+            ]
+        else:
+            data = [(tree.set(item, col), item) for item in tree.get_children("")]
+
+        data.sort(reverse=reverse)
+        for index, (value, item) in enumerate(data):
+            tree.move(item, "", index)
 
     def Check_Availability_Database(self):
         """the function will check if BMS_DB with correlated names (to the main CT path) is available,
@@ -1256,11 +1401,8 @@ class DatabasePage(tk.Frame):
 
         try:
             file_path = str(
-                Path(__file__).parent
-                / "Database"
-                / Installation
-                / theater
-                / "Database.db"
+                # Path(__file__).parent
+                Path(r"Database") / Installation / theater / "Database.db"
             )
             if os.path.isfile(file_path):
                 self.controller.shared_data["BMS_Database_Path"].set(file_path)
@@ -1282,12 +1424,55 @@ class DatabasePage(tk.Frame):
             self.ModelsTable.delete(row)
 
         data = self.controller.shared_data["BMS_Databse"]
-        for i in range(len(data)):
+        # Amount and information variables
+        features_amount = len(data)
+        avg_size = (data["Width"] * data["Length"]).mean()
+        max_height = (data["Height"]).max()
+
+        # Update the Table with the features information
+        for i in range(features_amount):
             list_data = list(data.iloc[i])
             # round the decimal numbers to 3, for better veiwing the data on the dable
             for col in range(7, 12):
                 list_data[col] = round(list_data[col], 3)
+            # Exclude "Class" and "Domain" columns
+            list_data = [
+                list_data[0],
+                list_data[1],
+                list_data[4],
+                list_data[5],
+                list_data[6],
+                list_data[7],
+                list_data[8],
+                list_data[9],
+                list_data[10],
+                list_data[11],
+                list_data[12],
+            ]
             self.ModelsTable.insert("", "end", values=list_data)
+
+        # make entries open
+        self.textbox_features_amount.configure(state="normal")
+        self.textbox_features_max_height.configure(state="normal")
+        self.textbox_features_avg_size.configure(state="normal")
+
+        # Update Enteties to the GUI
+        if len(self.textbox_features_amount.get()) > 0:
+            self.textbox_features_amount.delete(0, "end")
+        self.textbox_features_amount.insert(0, str(features_amount))
+
+        if len(self.textbox_features_avg_size.get()) > 0:
+            self.textbox_features_avg_size.delete(0, "end")
+        self.textbox_features_avg_size.insert(0, str(round(avg_size, 2)))
+
+        if len(self.textbox_features_max_height.get()) > 0:
+            self.textbox_features_max_height.delete(0, "end")
+        self.textbox_features_max_height.insert(0, str(round(max_height, 2)))
+
+        # make entries disable
+        self.textbox_features_amount.configure(state="disabled")
+        self.textbox_features_max_height.configure(state="disabled")
+        self.textbox_features_avg_size.configure(state="disabled")
 
     def Udpate_existedDB_Tables(self):
         """the function will update table of existing databases in the "Database" folder"""
@@ -1296,7 +1481,8 @@ class DatabasePage(tk.Frame):
             self.DB_Table.delete(row)
             self.controller.frames["DashboardPage"].Dash_DB_Table.delete(row)
 
-        main_path = str(Path(__file__).parent / "Database")
+        main_path = Path(r"Database")
+        # main_path = str(Path(__file__).parent / "Database")
         data = []
         idx = 1
         # go over all the folders in "Database" folder, and if "db" ending is found, the 2 folders
@@ -1327,7 +1513,8 @@ class DatabasePage(tk.Frame):
             )
 
         # Check version and theater of XML base folder
-        ownPath = str(Path(__file__).parent)
+        ownPath = Path(r"")
+        # ownPath = str(Path(__file__).parent)
         if self.controller.shared_data["Theater"].get() == "N/A":
             Theater = "N_A"
         else:
@@ -1350,7 +1537,10 @@ class DatabasePage(tk.Frame):
             if result:
                 try:
                     CT_path = self.controller.shared_data["CTpath"].get()
-                    GenerateDB(CT_path, db_save_path, backup_CT_path)  # Get Db saved
+                    debugger_state = self.controller.shared_data["debugger"]
+                    GenerateDB(
+                        CT_path, db_save_path, debugger_state, backup_CT_path
+                    )  # Get Db saved
                     self.NewDBupdate()
                 except ValueError:
                     messagebox.showwarning("Procedure Aborted", "Error has occurred")
@@ -1361,7 +1551,8 @@ class DatabasePage(tk.Frame):
         else:
             try:
                 CT_path = self.controller.shared_data["CTpath"].get()
-                GenerateDB(CT_path, db_save_path, backup_CT_path)
+                debugger_state = self.controller.shared_data["debugger"]
+                GenerateDB(CT_path, db_save_path, debugger_state, backup_CT_path)
                 self.NewDBupdate()
             except ValueError:
                 messagebox.showwarning("Procedure Aborted", "Error has occurred")
@@ -1406,6 +1597,11 @@ class GeoDataPage(tk.Frame):
     def __init__(self, parent, controller):
         tk.Frame.__init__(self, parent)
         self.controller = controller
+
+        self.Body_font = Ctk.CTkFont(family="Inter", size=15)
+        self.Body_font_Bold = Ctk.CTkFont(family="Inter", size=15, weight="bold")
+        self.button_font = Ctk.CTkFont(family="Inter", size=12)
+        self.dash_font = Ctk.CTkFont(family="Inter", size=10)
 
         self.canvas = Canvas(
             self,
@@ -1585,6 +1781,72 @@ class GeoDataPage(tk.Frame):
         )
         self.GeoJsonPath_loadButton.place(x=993, y=563)
 
+        # label and Entry for amount of structures
+        self.label_structures_amount = Ctk.CTkLabel(
+            self,
+            text="Amount of Structures:",
+            font=self.button_font,
+            bg_color="#F8F9FB",
+        )
+        self.label_structures_amount.place(x=247, y=486)
+        self.textbox_structures_amount = Ctk.CTkEntry(
+            self,
+            width=50,
+            height=18,
+            border_color="#D5E3F0",
+            fg_color="#E7E7E7",
+            placeholder_text="0",
+            state="disabled",
+        )
+        self.textbox_structures_amount.place(x=375, y=489)
+
+        # label and Entry for detailed structures
+        self.label_structures_detailed = Ctk.CTkLabel(
+            self, text="Detailed:", font=self.button_font, bg_color="#F8F9FB"
+        )
+        self.label_structures_detailed.place(x=454, y=486)
+        self.textbox_structures_detailed = Ctk.CTkEntry(
+            self,
+            width=50,
+            height=18,
+            border_color="#D5E3F0",
+            fg_color="#E7E7E7",
+            placeholder_text="0",
+            state="disabled",
+        )
+        self.textbox_structures_detailed.place(x=518, y=489)
+
+        # label and Entry for structures_center
+        self.label_structures_center = Ctk.CTkLabel(
+            self, text="Center:", font=self.button_font, bg_color="#F8F9FB"
+        )
+        self.label_structures_center.place(x=598, y=486)
+        self.textbox_structures_center = Ctk.CTkEntry(
+            self,
+            width=300,
+            height=18,
+            border_color="#D5E3F0",
+            fg_color="#E7E7E7",
+            placeholder_text="XXXX/YYYY",
+            state="disabled",
+        )
+        self.textbox_structures_center.place(x=649, y=489)
+
+        # Load button to apply the main function of loading Geo data
+        self.osm_legend_window = Ctk.CTkButton(
+            self,
+            text="OSM Legend",
+            fg_color="#D5E3F0",
+            bg_color="#f0f0f0",
+            command=self.osm_legend_class,
+            height=25,
+            width=100,
+            corner_radius=15,
+            font=("Sans Font", 15),
+            text_color="#000000",
+        )
+        self.osm_legend_window.place(x=973, y=488)
+
         self.image_image_8 = PhotoImage(
             file=str(self.controller.ASSETS_PATH / "Rectrangle_Geo.png")
         )
@@ -1624,8 +1886,10 @@ class GeoDataPage(tk.Frame):
             "Type",
             "Levels",
             "Height",
+            "Aeroway",
             "Amenity",
             "Barrier",
+            "Bridge",
             "Building",
             "Diplomatic",
             "Leisure",
@@ -1634,13 +1898,14 @@ class GeoDataPage(tk.Frame):
             "Office",
             "Power",
             "Religion",
+            "Service",
             "Sport",
         ]
         self.GeoTable = ttk.Treeview(
             GeoTable_frame,
             columns=columns,
             show="headings",
-            height=15,
+            height=17,
             yscrollcommand=vScrollGeoTable.set,
         )
         self.GeoTable.grid(row=0, column=0, sticky="nsew")
@@ -1648,13 +1913,30 @@ class GeoDataPage(tk.Frame):
         # Configure the scroll bar
         vScrollGeoTable.config(command=self.GeoTable.yview)
 
+        # Set up sorting callback for columns
+        for col in columns:
+            self.GeoTable.heading(
+                col,
+                text=col,
+                command=lambda c=col: self.sort_column_geo(self.GeoTable, c),
+            )
+
         for col in columns:
             self.GeoTable.heading(col, text=col)
-            self.GeoTable.column(col, width=56)
+            # Place Sizes of columns better
+            if col == "Index":
+                self.GeoTable.column(col, width=28)
+            elif col == "Levels":
+                self.GeoTable.column(col, width=10)
+            else:
+                self.GeoTable.column(col, width=38)
             self.GeoTable.insert(
                 "",
                 "end",
                 values=[
+                    "-",
+                    "-",
+                    "-",
                     "-",
                     "-",
                     "-",
@@ -1717,10 +1999,30 @@ class GeoDataPage(tk.Frame):
         self.theater_box.lift()
 
         self.BMSver_box = tk.Label(
-            self, textvariable=self.controller.shared_data["BMS_version"], wraplength=100
+            self,
+            textvariable=self.controller.shared_data["BMS_version"],
+            wraplength=100,
         )
         self.BMSver_box.place(x=555.0, y=663.0, width=112.0, height=28.0)
         self.BMSver_box.lift()
+
+    def osm_legend_class(self):
+        OSMLegend.OSMLegend()
+
+    def sort_column_geo(self, tree, col, reverse=False):
+        """Sort the data in the given column."""
+        if col == "Index":
+            data = [(int(tree.set(item, col)), item) for item in tree.get_children("")]
+        elif col in ["Length", "Width", "Rotation", "Height"]:
+            data = [
+                (float(tree.set(item, col)), item) for item in tree.get_children("")
+            ]
+        else:
+            data = [(tree.set(item, col), item) for item in tree.get_children("")]
+
+        data.sort(reverse=reverse)
+        for index, (value, item) in enumerate(data):
+            tree.move(item, "", index)
 
     def CalculateGeo(self):
         """will get Geo-Json file and If the file is valid, The box will be updated with the path string, and the structures list
@@ -1736,9 +2038,14 @@ class GeoDataPage(tk.Frame):
         ):
             string = self.controller.shared_data["projection_string"].get()
             try:
+                debugger_state = self.controller.shared_data["debugger"]
                 GeoFeatures, CalcData_GeoFeatures, AOI_center = geo.Load_Geo_File(
-                    file_path, string
+                    file_path, debugger_state, string
                 )
+                self.update_geo_data_GUI_fields(
+                    GeoFeatures, CalcData_GeoFeatures, AOI_center
+                )
+
             except ValueError:
                 # Show message if string is not valid
                 messagebox.showerror(
@@ -1747,9 +2054,15 @@ class GeoDataPage(tk.Frame):
                 return
         else:
             try:
+                debugger_state = self.controller.shared_data["debugger"]
                 GeoFeatures, CalcData_GeoFeatures, AOI_center = geo.Load_Geo_File(
-                    file_path
+                    file_path, debugger_state
                 )
+
+                self.update_geo_data_GUI_fields(
+                    GeoFeatures, CalcData_GeoFeatures, AOI_center
+                )
+
             except ValueError:
                 return messagebox.showerror(
                     "Error", "Projection string or GeoJson path are not valid"
@@ -1775,8 +2088,8 @@ class GeoDataPage(tk.Frame):
                 round(val, 3) for val in data_list[2:5]
             ]  # Round length, width, rotation
             try:
-                data_list[9] = round(
-                    heights[0, i], 3
+                data_list[8] = round(
+                    float(heights[0, i]), 3
                 )  # Replace initial height from the raw Geofile to the calculated height
             except:
                 data_list[9] = 0
@@ -1786,6 +2099,43 @@ class GeoDataPage(tk.Frame):
         return messagebox.showinfo(
             "Success", "The load of GeoData from GeoJson file has been succeeded"
         )
+
+    def update_geo_data_GUI_fields(self, GeoFeatures, CalcData_GeoFeatures, AOI_center):
+        """
+
+        :param self:
+        :param GeoFeatures:
+        :param CalcData_GeoFeatures:
+        :param AOI_center:
+
+        called from the function CalculateGeo for updating the GUI page with the new data
+        """
+
+        # update the status of structures amount to the GUI
+        self.textbox_structures_amount.configure(state="normal")
+        self.textbox_structures_amount.delete(0, tk.END)
+        self.textbox_structures_amount.insert(0, str(len(GeoFeatures)))
+        self.textbox_structures_amount.configure(state="disabled")
+
+        # update the status of detailed structures to the GUI
+        self.textbox_structures_detailed.configure(state="normal")
+        self.textbox_structures_detailed.delete(0, tk.END)
+        CalcData_GeoFeatures = pd.DataFrame(CalcData_GeoFeatures)
+        self.textbox_structures_detailed.insert(
+            0, str(CalcData_GeoFeatures["Detailed Structure"].value_counts()[1.0])
+        )
+        self.textbox_structures_detailed.configure(state="disabled")
+
+        # Convert the numbers to strings and Join the numbers with a '/'
+        str_AOI_center = " / ".join([str(num) for num in AOI_center])
+        initial_value = self.textbox_structures_center.get()
+        len_initial_value = len(initial_value)
+        # update the status on the GUI, Entry need to be enabled before updating it's value
+        self.textbox_structures_center.configure(state="normal")
+        if len_initial_value > 0:
+            self.textbox_structures_center.delete(0, tk.END)
+        self.textbox_structures_center.insert(0, str_AOI_center)
+        self.textbox_structures_center.configure(state="disabled")
 
     def SelectGeoJsonFile(self, event):
         """Clicking on Geo box will open dialog which will allow to select"""
@@ -2081,9 +2431,7 @@ class OperationPage(tk.Frame):
         self.Rectangle_Op_4 = PhotoImage(
             file=str(self.controller.ASSETS_PATH / "Rectangle_Op_4.png")
         )
-        self.canvas.create_image(
-            989.0, 553.0, image=self.Rectangle_Op_4
-        )
+        self.canvas.create_image(989.0, 553.0, image=self.Rectangle_Op_4)
 
         self.image_image_9 = PhotoImage(
             file=str(self.controller.ASSETS_PATH / "Rectangle_Op_3.png")
@@ -2137,7 +2485,9 @@ class OperationPage(tk.Frame):
         self.theater_box.lift()
 
         self.BMSver_box = tk.Label(
-            self, textvariable=self.controller.shared_data["BMS_version"], wraplength=100
+            self,
+            textvariable=self.controller.shared_data["BMS_version"],
+            wraplength=100,
         )
         self.BMSver_box.place(x=555.0, y=663.0, width=112.0, height=28.0)
         self.BMSver_box.lift()
@@ -2163,7 +2513,7 @@ class OperationPage(tk.Frame):
         # Create the segemented_button widget for Method Selection
         self.segemented_button = Ctk.CTkSegmentedButton(
             self,
-            values=["GeoJson", "Random Selection"],
+            values=["Random Selection", "GeoJson"],
             fg_color="#D5E3F0",
             unselected_color="#D5E3F0",
             selected_color="#8DBBE7",
@@ -2189,13 +2539,6 @@ class OperationPage(tk.Frame):
             font=("Inter", 14 * -1),
         )
 
-        # Create the CTkTextbox widget for radius
-        self.textbox_Radius_random = Ctk.CTkEntry(
-            self, width=74, height=18, border_color="#D5E3F0", text_color="#565454"
-        )
-        self.textbox_Radius_random.place(x=705, y=172)
-        self.textbox_Radius_random.insert(0, 3600)
-
         self.canvas.create_text(
             287.0,
             175.0,
@@ -2205,12 +2548,12 @@ class OperationPage(tk.Frame):
             font=("Inter", 12 * -1),
         )
 
-        # Create the CTkTextbox widget for amount
-        self.textbox_Amount_random = Ctk.CTkEntry(
-            self, width=74, height=18, border_color="#D5E3F0", text_color="#565454"
+        # Create the CTkTextbox widget for radius
+        self.textbox_Radius_random = Ctk.CTkEntry(
+            self, width=95, height=18, border_color="#D5E3F0", text_color="#565454"
         )
-        self.textbox_Amount_random.place(x=705, y=200)
-        self.textbox_Amount_random.insert(0, 256)
+        self.textbox_Radius_random.place(x=684, y=172)
+        self.textbox_Radius_random.insert(0, 3600)
 
         self.canvas.create_text(
             287.0,
@@ -2221,43 +2564,61 @@ class OperationPage(tk.Frame):
             font=("Inter", 12 * -1),
         )
 
-        # Create the CTkTextbox/box widget for value on random
-        self.switch_Values_random_var = Ctk.StringVar(value="on")
-        self.switch_Values_random = Ctk.CTkSwitch(
-            self,
-            text="",
-            bg_color="#FDFBFC",
-            command=self.switch_value_State_random,
-            variable=self.switch_Values_random_var,
-            onvalue=1,
-            offvalue=0,
+        # Create the CTkTextbox widget for amount
+        self.textbox_Amount_random = Ctk.CTkEntry(
+            self, width=95, height=18, border_color="#D5E3F0", text_color="#565454"
         )
-        self.switch_Values_random.place(x=654, y=223)
+        self.textbox_Amount_random.place(x=684, y=200)
+        self.textbox_Amount_random.insert(0, 256)
+
+        # Set CTkTextbox widget and option selection menu for value mapping for geo data
+        self.values_rand_optionmenu = Ctk.CTkOptionMenu(
+            self,
+            width=80,
+            height=18,
+            fg_color="#D5E3F0",
+            text_color="#565454",
+            values=["Solid", "Random", "Map"],
+            command=lambda current_option: self.value_State(current_option, "rand"),
+        )
+        self.values_rand_optionmenu.place(x=580, y=227)
+        self.values_rand_optionmenu.set("Solid")
+
+        self.values_rand_mapping = Ctk.CTkButton(
+            self,
+            text="#",
+            fg_color="#8DBBE7",
+            width=20,
+            height=18,
+            corner_radius=20,
+            command=self.value_mapping,
+        )
+        self.values_rand_mapping.place(x=545, y=227)
+
+        self.canvas.create_text(
+            287.0,
+            227.0,
+            anchor="nw",
+            text="Values",
+            fill="#000000",
+            font=("Inter", 12 * -1),
+        )
 
         self.textbox_Values_random2 = Ctk.CTkEntry(
-            self, width=35, height=18, border_color="#D5E3F0", text_color="#565454"
+            self, width=45, height=18, border_color="#D5E3F0", text_color="#565454"
         )
-        self.textbox_Values_random2.place(x=745, y=226)
+        self.textbox_Values_random2.place(x=734, y=226)
         self.textbox_Values_random2.insert(0, 100)
         self.textbox_Values_random1 = Ctk.CTkEntry(
             self,
-            width=35,
+            width=45,
             height=18,
             border_color="#D5E3F0",
             fg_color="#E7E7E7",
             state="disabled",
             text_color="#565454",
         )
-        self.textbox_Values_random1.place(x=705, y=226)
-
-        self.canvas.create_text(
-            287.0,
-            227.0,
-            anchor="nw",
-            text="Values ",
-            fill="#000000",
-            font=("Inter", 12 * -1),
-        )
+        self.textbox_Values_random1.place(x=684, y=226)
 
         self.canvas.create_text(
             287.0,
@@ -2278,24 +2639,24 @@ class OperationPage(tk.Frame):
             onvalue=1,
             offvalue=0,
         )
-        self.switch_Presence_random.place(x=654, y=252)
+        self.switch_Presence_random.place(x=597, y=252)
 
         # min and maximum values (2 - max, 1- min)
         self.textbox_Presence_random2 = Ctk.CTkEntry(
-            self, width=35, height=18, border_color="#D5E3F0", text_color="#565454"
+            self, width=45, height=18, border_color="#D5E3F0", text_color="#565454"
         )
-        self.textbox_Presence_random2.place(x=745, y=252)
+        self.textbox_Presence_random2.place(x=734, y=252)
         self.textbox_Presence_random2.insert(0, 100)
         self.textbox_Presence_random1 = Ctk.CTkEntry(
             self,
-            width=35,
+            width=45,
             height=18,
             border_color="#D5E3F0",
             fg_color="#E7E7E7",
             state="disabled",
             text_color="#565454",
         )
-        self.textbox_Presence_random1.place(x=705, y=252)
+        self.textbox_Presence_random1.place(x=684, y=252)
 
         self.canvas.create_rectangle(
             266.5, 298.5, 778.0, 299.0, fill="#B3C8DD", outline=""
@@ -2348,13 +2709,13 @@ class OperationPage(tk.Frame):
         # Set Fillter option selection menu
         self.Fillter_optionmenu = Ctk.CTkOptionMenu(
             self,
-            width=124,
+            width=94,
             height=18,
             fg_color="#D5E3F0",
             text_color="#565454",
             values=["Height", "Area", "Total Size", "Centerness", "Mix", "Random"],
         )
-        self.Fillter_optionmenu.place(x=654, y=365)
+        self.Fillter_optionmenu.place(x=684, y=365)
         self.Fillter_optionmenu.set("Total Size")
 
         self.canvas.create_text(
@@ -2376,10 +2737,21 @@ class OperationPage(tk.Frame):
         )
         # Create the CTkTextbox widget for Amount
         self.textbox_Amount_geo = Ctk.CTkEntry(
-            self, width=74, height=18, border_color="#D5E3F0", text_color="#565454"
+            self, width=95, height=18, border_color="#D5E3F0", text_color="#565454"
         )
-        self.textbox_Amount_geo.place(x=705, y=313)
+        self.textbox_Amount_geo.place(x=684, y=313)
         self.textbox_Amount_geo.insert(0, 100)
+
+        # Create the max button widget for max Amount
+        self.button_Amount_geo = Ctk.CTkButton(
+            self,
+            text="Maximum",
+            fg_color="#8DBBE7",
+            width=116,
+            height=18,
+            command=self.get_maximum_amount_geo,
+        )
+        self.button_Amount_geo.place(x=545, y=314)
 
         self.canvas.create_text(
             286.0,
@@ -2393,13 +2765,13 @@ class OperationPage(tk.Frame):
         # Set Fitting options selection menu and AutoDetect mechanism checkbox
         self.Selection_optionmenu = Ctk.CTkOptionMenu(
             self,
-            width=124,
+            width=94,
             height=18,
             fg_color="#D5E3F0",
             text_color="#565454",
             values=["3D", "2D"],
         )
-        self.Selection_optionmenu.place(x=654, y=391)
+        self.Selection_optionmenu.place(x=684, y=391)
         self.Auto_features_detector = Ctk.CTkCheckBox(
             self,
             checkbox_height=18,
@@ -2412,7 +2784,7 @@ class OperationPage(tk.Frame):
             width=30,
             bg_color="#FDFBFC",
         )
-        self.Auto_features_detector.place(x=600, y=388)
+        self.Auto_features_detector.place(x=589, y=388)
 
         self.canvas.create_text(
             287.0,
@@ -2424,35 +2796,47 @@ class OperationPage(tk.Frame):
         )
 
         # Create the CTkTextbox widget for Values
-        self.switch_Values_geo_ver = Ctk.StringVar(value="on")
-        self.switch_Values_geo = Ctk.CTkSwitch(
+        # Set  option selection menu for value mapping for geo data
+        self.values_geo_optionmenu = Ctk.CTkOptionMenu(
             self,
-            text="",
-            bg_color="#FDFBFC",
-            command=self.switch_value_State_geo,
-            variable=self.switch_Values_geo_ver,
-            onvalue=1,
-            offvalue=0,
+            width=80,
+            height=18,
+            fg_color="#D5E3F0",
+            text_color="#565454",
+            values=["Solid", "Random", "Map"],
+            command=lambda current_option: self.value_State(current_option, "geo"),
         )
-        self.switch_Values_geo.place(x=654, y=339)
+        self.values_geo_optionmenu.place(x=580, y=341)
+        self.values_geo_optionmenu.set("Solid")
+
+        self.values_geo_mapping = Ctk.CTkButton(
+            self,
+            text="#",
+            fg_color="#8DBBE7",
+            width=20,
+            height=18,
+            corner_radius=20,
+            command=self.value_mapping,
+        )
+        self.values_geo_mapping.place(x=545, y=341)
 
         # min and maximum values (2 - max, 1- min)
         self.textbox_Values_geo2 = Ctk.CTkEntry(
-            self, width=35, height=18, border_color="#D5E3F0", text_color="#565454"
+            self, width=45, height=18, border_color="#D5E3F0", text_color="#565454"
         )
-        self.textbox_Values_geo2.place(x=745, y=339)
+        self.textbox_Values_geo2.place(x=734, y=339)
         self.textbox_Values_geo2.insert(0, 100)
 
         self.textbox_Values_geo1 = Ctk.CTkEntry(
             self,
-            width=35,
+            width=45,
             height=18,
             border_color="#D5E3F0",
             fg_color="#E7E7E7",
             state="disabled",
             text_color="#565454",
         )
-        self.textbox_Values_geo1.place(x=705, y=339)
+        self.textbox_Values_geo1.place(x=684, y=339)
 
         self.canvas.create_text(
             287.0,
@@ -2473,7 +2857,7 @@ class OperationPage(tk.Frame):
             onvalue=1,
             offvalue=0,
         )
-        self.switch_Presence_geo.place(x=654, y=417)
+        self.switch_Presence_geo.place(x=597, y=417)
 
         # min and maximum Presence (2 - max, 1- min)
         self.textbox_Presence_geo2 = Ctk.CTkEntry(
@@ -2523,10 +2907,6 @@ class OperationPage(tk.Frame):
         self.textbox_CT.place(x=460, y=518)
 
         self.canvas.create_rectangle(
-            712.0, 339.0, 778.0, 357.0, fill="#B9D2EA", outline=""
-        )
-
-        self.canvas.create_rectangle(
             256.5,
             475.50000173039734,
             790.999076962471,
@@ -2547,7 +2927,7 @@ class OperationPage(tk.Frame):
         # Create the segemented_button widget for Method Selection
         self.segemented_button_Saving = Ctk.CTkSegmentedButton(
             self,
-            values=["Editor", "BMS"],
+            values=["BMS", "Editor"],
             fg_color="#D5E3F0",
             unselected_color="#D5E3F0",
             selected_color="#8DBBE7",
@@ -2618,7 +2998,7 @@ class OperationPage(tk.Frame):
             text="More",
             font=("Arial", 10),
             text_color="#565454",
-            command=self.Browse_saving_path,
+            # command=self.Browse_saving_path,
             fg_color="#D5E3F0",
         )
         self.Get_More_button.place(x=499, y=490)
@@ -2628,7 +3008,7 @@ class OperationPage(tk.Frame):
             width=46,
             height=18,
             text="Browse",
-            command=self.Browse_saving_path,
+            # command=self.Browse_saving_path,
             fg_color="#8DBBE7",
         )
         self.Get_Objective_button.place(x=400, y=518)
@@ -2637,7 +3017,7 @@ class OperationPage(tk.Frame):
             width=46,
             height=18,
             text="Browse",
-            command=self.Browse_saving_path,
+            # command=self.Browse_saving_path,
             fg_color="#8DBBE7",
         )
         self.Get_CT_button.place(x=400, y=544)
@@ -2778,6 +3158,46 @@ class OperationPage(tk.Frame):
             x=882, y=285
         )  # Adjust the y-coordinate for the second row
         self.segemented_button_graphing2.set("None")
+
+    def value_mapping(self):
+        """
+        Will launch the window to get the custom values for the value_mapping in the random  and GeoData sections.
+        the window will take the values from the ValuesDic.json file.
+        while window is opened, any buttons related are disabled.
+        """
+        self.values_rand_mapping.configure(state="disabled")
+        self.values_geo_mapping.configure(state="disabled")
+        ValuesDictionary.ValuesDictionary(
+            filepath="ValuesDic.json", callback=self.value_mapping_close
+        )
+
+    def value_mapping_close(self):
+        self.values_geo_mapping.configure(state="normal")
+        self.values_rand_mapping.configure(state="normal")
+
+    def get_maximum_amount_geo(self):
+        try:
+            count = self.controller.frames[
+                "GeoDataPage"
+            ].textbox_structures_amount.get()
+            if len(count) > 0:
+                self.textbox_Amount_geo.delete(0, "end")
+                if 0 < int(count) <= 255:
+                    self.textbox_Amount_geo.insert(0, count)
+                elif int(count) > 255:
+                    self.textbox_Amount_geo.insert(0, "255")
+            else:
+                return messagebox.showerror(
+                    "Error",
+                    "Geo-Data is not loaded correctly\n"
+                    "Please load the data and try again.",
+                )
+        except:
+            return messagebox.showerror(
+                "Error",
+                "Geo-Data is not loaded correctly\n"
+                "Please load the data and try again.",
+            )
 
     def auto_graph_generating(self):
         '''The function will decide which map to generate based on the Segmented button in the GUI
@@ -3008,17 +3428,6 @@ class OperationPage(tk.Frame):
         """The fuction will diselect button segemented_button_graphing1"""
         self.segemented_button_graphing1.set("")
 
-    def switch_value_State_random(self):
-        """The function decides the ability to write values in the first entry box"""
-        current_state = self.switch_Values_random.get()
-
-        if current_state == 0:
-            self.textbox_Values_random1.configure(state="disabled")
-            self.textbox_Values_random1.configure(fg_color="#E7E7E7")
-        else:
-            self.textbox_Values_random1.configure(state="normal")
-            self.textbox_Values_random1.configure(fg_color="white")
-
     def switch_presence_State_random(self):
         """The function decides the ability to write values in the first entry box"""
         current_state = self.switch_Presence_random.get()
@@ -3030,16 +3439,47 @@ class OperationPage(tk.Frame):
             self.textbox_Presence_random1.configure(state="normal")
             self.textbox_Presence_random1.configure(fg_color="white")
 
-    def switch_value_State_geo(self):
-        """The function decides the ability to write values in the first entry box"""
-        current_state = self.switch_Values_geo.get()
+    def value_State(self, current_option, value):
+        """The function decides the ability to write values in the first or second entry box in random or geoData section"""
 
-        if current_state == 0:
-            self.textbox_Values_geo1.configure(state="disabled")
-            self.textbox_Values_geo1.configure(fg_color="#E7E7E7")
-        else:
-            self.textbox_Values_geo1.configure(state="normal")
-            self.textbox_Values_geo1.configure(fg_color="white")
+        if current_option == "Solid":
+            # Disable first textbox and enable second textbox on Geo section or Random Section
+            if value == "geo":
+                self.textbox_Values_geo1.configure(state="disabled")
+                self.textbox_Values_geo1.configure(fg_color="#E7E7E7")
+                self.textbox_Values_geo2.configure(state="normal")
+                self.textbox_Values_geo2.configure(fg_color="white")
+            elif value == "rand":
+                self.textbox_Values_random1.configure(state="disabled")
+                self.textbox_Values_random1.configure(fg_color="#E7E7E7")
+                self.textbox_Values_random2.configure(state="normal")
+                self.textbox_Values_random2.configure(fg_color="white")
+
+        elif current_option == "Random":
+            # Enable first and second textboxs on Geo section or Random Section
+            if value == "geo":
+                self.textbox_Values_geo1.configure(state="normal")
+                self.textbox_Values_geo1.configure(fg_color="white")
+                self.textbox_Values_geo2.configure(state="normal")
+                self.textbox_Values_geo2.configure(fg_color="white")
+            elif value == "rand":
+                self.textbox_Values_random1.configure(state="normal")
+                self.textbox_Values_random1.configure(fg_color="white")
+                self.textbox_Values_random2.configure(state="normal")
+                self.textbox_Values_random2.configure(fg_color="white")
+
+        elif current_option == "Map":
+            if value == "geo":
+                # disable first and second textboxs on Geo section or Random Section
+                self.textbox_Values_geo1.configure(state="disabled")
+                self.textbox_Values_geo1.configure(fg_color="#E7E7E7")
+                self.textbox_Values_geo2.configure(state="disabled")
+                self.textbox_Values_geo2.configure(fg_color="#E7E7E7")
+            elif value == "rand":
+                self.textbox_Values_random1.configure(state="disabled")
+                self.textbox_Values_random1.configure(fg_color="#E7E7E7")
+                self.textbox_Values_random2.configure(state="disabled")
+                self.textbox_Values_random2.configure(fg_color="#E7E7E7")
 
     def switch_presence_State_geo(self):
         """The function decides the ability to write values in the first entry box"""
@@ -3054,203 +3494,8 @@ class OperationPage(tk.Frame):
             self.textbox_Presence_geo1.configure(fg_color="white")
 
     def restriction_window(self):
-        """Will show all the restrictions that are available in BMS"""
-        # disable button
-        self.restriction_button.configure(state="disabled")
-
-        window = Ctk.CTkToplevel(self)
-        window.geometry("475x325")
-        window.resizable(True, True)
-        window.title("Restriction Window")
-
-        # Create a dictionary to map checkbox names to numbers
-        checkbox_dict = {
-            "Carter": "1",
-            "Control Tower": "2",
-            "Barn": "3",
-            "Bunker": "4",
-            "Blush": "5",
-            "Factories": "6",
-            "Church": "7",
-            "City Hall": "8",
-            "Dock": "9",
-            "Depot": "10",
-            "Runway": "11",
-            "Warehouse": "12",
-            "Helipad": "13",
-            "Fuel Tanks": "14",
-            "Nuclear Plant": "15",
-            "Bridges": "16",
-            "Pier": "17",
-            "Power Pole": "18",
-            "Shops": "19",
-            "Power Tower": "20",
-            "Apartment": "21",
-            "House": "22",
-            "Power Plant": "23",
-            "Taxi Signs": "24",
-            "Nav Beacon": "25",
-            "Radart Site": "26",
-            "Craters": "27",
-            "Radars": "28",
-            "R Tower": "29",
-            "Taxiway": "30",
-            "Rail Terminal": "31",
-            "Refinery": "32",
-            "SAM": "33",
-            "Shed": "34",
-            "Barracks": "35",
-            "Tree": "36",
-            "Water Tower": "37",
-            "Town Hall": "38",
-            "Air Terminal": "39",
-            "Shrine": "40",
-            "Park": "41",
-            "Off Block": "42",
-            "TV Station": "43",
-            "Hotel": "44",
-            "Hangar": "45",
-            "Lights": "46",
-            "VASI": "47",
-            "Storage Tank": "48",
-            "Fence": "49",
-            "Parking Lot": "50",
-            "Smoke Stack": "51",
-            "Building": "52",
-            "Cooling Tower": "53",
-            "Cont Dome": "54",
-            "Guard House": "55",
-            "Transformer": "56",
-            "Ammo Dump": "57",
-            "Art Site": "58",
-            "Office": "59",
-            "Chemical Plant": "60",
-            "Tower": "61",
-            "Hospital": "62",
-            "Shops/Blocks": "63",
-            "Static": "64",
-            "Runway Marker": "65",
-            "Stadium": "66",
-            "Monument": "67",
-            "Arrestor Cable": "68",
-        }
-
-        # Create a dictionary to store the checkboxes
-        checkboxes = {}
-
-        # Create a scrolled frame to hold the checkboxes
-        scrolled_frame = Ctk.CTkScrollableFrame(window)
-        scrolled_frame.pack(fill="both", expand=True, pady=5, padx=5)
-
-        # Check the checkboxes based on the numbers in the restriction box
-        # Split the Fillter string into individual items
-        restriction_list = [
-            item.strip() for item in self.restriction_box.get("0.0", "end").split(",")
-        ]
-
-        # Create a list to stor the numbers of the checked checkboxes
-        checked_checkboxes = [item for item in restriction_list if item.isdigit()]
-
-        for i, checkbox_name in enumerate(checkbox_dict.keys()):
-            var = tk.IntVar()
-            if checkbox_dict[checkbox_name] in checked_checkboxes:
-                var.set(1)
-            checkbox = Ctk.CTkCheckBox(
-                scrolled_frame,
-                text=checkbox_name,
-                variable=var,
-                onvalue=1,
-                offvalue=0,
-            )
-            checkbox.configure(
-                command=partial(
-                    self.update_checked_checkboxes,
-                    checkbox_dict,
-                    checked_checkboxes,
-                    var,
-                    checkbox_name,
-                )
-            )
-            checkbox.grid(row=i // 4, column=i % 4, sticky="w")
-            # Store the checkbox and the associated variable in the dictionary
-            checkboxes[checkbox_name] = (checkbox, var)
-
-        # Create two buttons at the bottom of the page
-        button_Import = Ctk.CTkButton(
-            window,
-            text="Import",
-            command=partial(
-                self.import_restriction_text,
-                checked_checkboxes,
-                checkbox_dict,
-                checkboxes,
-            ),
-            fg_color="#8DBBE7",
-        )
-        button_Import.pack(side="bottom", fill="x", pady=5, padx=5)
-        button_Export = Ctk.CTkButton(
-            window,
-            text="Export",
-            command=partial(self.export_restriction_text, checked_checkboxes),
-            fg_color="#8DBBE7",
-        )
-        button_Export.pack(side="bottom", fill="x", pady=5, padx=5)
-
-        # Make the window always appear on top
-        window.attributes("-topmost", 1)
-
-        # Bind the window's "destroy" event to a function that enables the button
-        window.bind("<Destroy>", self.enable_restriction_button)
-
-    def import_restriction_text(self, checked_checkboxes, checkbox_dict, checkboxes):
-        """The function ill load the restriction text box into the restriction window"""
-        restriction_list = [
-            item.strip() for item in self.restriction_box.get("0.0", "end").split(",")
-        ]
-
-        # Create a list to stor the numbers of the checked checkboxes
-        checked_checkboxes = [item for item in restriction_list if item.isdigit()]
-
-        # Check the checkboxes if their numbers are in the list
-        for checkbox_name, checkbox_var in checkboxes.items():
-            checkbox, var = checkbox_var
-            if checkbox_dict[checkbox_name] in checked_checkboxes:
-                var.set(1)
-            else:
-                var.set(0)
-
-    def export_restriction_text(self, checked_checkboxes):
-        """The function ill save the checkboxes selected in the restriction window to the restriction text box"""
-        text_box = self.restriction_box.get("0.0", "end")
-
-        all_features = [item.strip() for item in text_box.split(",")]
-        words = [word.strip() for word in all_features if not word.isdigit()]
-        if "" in words:
-            words.remove("")
-        if "\n" in words:
-            words.remove("\n")
-
-        # Create string of all new features (words and numbers)
-        new_features = words
-        new_features.extend(checked_checkboxes)
-        new_features = ", ".join(new_features)
-
-        # Insert into the Gui box
-        self.restriction_box.delete("0.0", tk.END)
-        self.restriction_box.insert(tk.END, new_features)
-
-    def update_checked_checkboxes(self, checkbox_dict, checked_checkboxes, var, name):
-        if var.get() == 1:
-            # If the checkbox is checked, add its number to the list
-            checked_checkboxes.append(checkbox_dict[name])
-        else:
-            # If the checkbox is unchecked, remove its number from the list if it exists
-            if checkbox_dict[name] in checked_checkboxes:
-                checked_checkboxes.remove(checkbox_dict[name])
-
-    def enable_restriction_button(self, event):
-        # Enable the button
-        self.restriction_button.configure(state="normal")
+        """Will Create a new window Class of the restrictions functionalities outside of the main GUI"""
+        Restrictions.RestrictionsWindow(self.restriction_box, self.restriction_button)
 
     def Browse_saving_path(self):
         """The function opens UI window for finding a saving path for Editor new generated files
@@ -3261,12 +3506,15 @@ class OperationPage(tk.Frame):
 
     def Create_Feature_List_For_BMS(self):
         # Check all requests before continue to the algorithm
+        ## Set Version of Software:
+        BuildingGeneratorVer = "0.91b"
+
         generating_method = self.segemented_button.get()
         saving_method = self.segemented_button_Saving.get()
         # ##########  GeoJson Generating method part ##########
         if generating_method == "GeoJson":
             # Check if geo-data calculated already
-            if not self.controller.shared_data["Geodata"].empty:
+            if "Calc_Geodata" in self.controller.shared_data:
                 GeoFeatures = self.controller.shared_data["Geodata"]
                 CalcData_GeoFeatures = self.controller.shared_data["Calc_Geodata"]
                 AOI_center = self.controller.shared_data["Geo_AOI_center"]
@@ -3275,17 +3523,23 @@ class OperationPage(tk.Frame):
                 if self.controller.shared_data["Database_Availability"].get() == "1":
                     DB_path = self.controller.shared_data["BMS_Database_Path"].get()
                     num_features = max(min(int(self.textbox_Amount_geo.get()), 256), 1)
-                    Values = max(min(int(self.textbox_Values_geo2.get()), 100), 0)
 
-                    # If range of value is found set it in variable
-                    if self.switch_Values_geo.get() == 1:
+                    # Prepere values of features through the option menu selection
+                    if self.values_geo_optionmenu.get() == "Solid":
+                        Values = max(min(int(self.textbox_Values_geo2.get()), 100), 0)
+                        Values_i = None
+
+                    elif self.values_geo_optionmenu.get() == "Random":
+                        Values = max(min(int(self.textbox_Values_geo2.get()), 100), 0)
                         Values_i = max(
                             min(int(self.textbox_Values_geo1.get()), Values), 0
                         )
                     else:
+                        Values = None
                         Values_i = None
-                    Presence = max(min(int(self.textbox_Presence_geo2.get()), 100), 0)
 
+                    # Prepere Presence of features through the Switch selection
+                    Presence = max(min(int(self.textbox_Presence_geo2.get()), 100), 0)
                     # If range of presence is found set it in variable
                     if self.switch_Presence_geo.get() == 1:
                         Presence_i = max(
@@ -3297,13 +3551,6 @@ class OperationPage(tk.Frame):
                     fillter = self.Fillter_optionmenu.get()
                     selection = self.Selection_optionmenu.get()
 
-                    # missing critical values will cause error
-                    if not Presence or not Values or not Values or not num_features:
-                        return messagebox.showwarning(
-                            "Procedure Aborted",
-                            "Error: Some Values are missing\n"
-                            "Make sure all the preferences are filled properly",
-                        )
                     restriction_text = self.restriction_box.get("0.0", "end")
 
                     (
@@ -3339,13 +3586,14 @@ class OperationPage(tk.Frame):
                             Values,
                             Presence_i,
                             Values_i,
-                            self.Auto_features_detector,
+                            self.Auto_features_detector.get(),
+                            BuildingGeneratorVer,
                         )
 
                         # Without issues, success message will apear
                         messagebox.showinfo(
                             "Operation succeeded",
-                            f"Editor file with {num_features} Random feautures has been successfully "
+                            f"Editor file with {num_features} Accurate feautures has been successfully "
                             f"generated",
                         )
                         # Will generate graph of the BMSfeatures/GeoFeatures based on the segmented button in the GUI
@@ -3374,17 +3622,29 @@ class OperationPage(tk.Frame):
                     num_features = max(
                         min(int(self.textbox_Amount_random.get()), 256), 1
                     )
-                    Values = max(min(int(self.textbox_Values_random2.get()), 100), 0)
-                    Presence = max(min(int(self.textbox_Presence_random2.get()), 100), 0)
 
-                    if self.switch_Values_random.get() == 1:
-                        # If range of value is found set it in variable
+                    # Prepere values of features through the option menu selection
+                    if self.values_rand_optionmenu.get() == "Solid":
+                        Values = max(
+                            min(int(self.textbox_Values_random2.get()), 100), 0
+                        )
+                        Values_i = None
+
+                    elif self.values_rand_optionmenu.get() == "Random":
+                        Values = max(
+                            min(int(self.textbox_Values_random2.get()), 100), 0
+                        )
                         Values_i = max(
                             min(int(self.textbox_Values_random1.get()), Values), 0
                         )
                     else:
+                        Values = None
                         Values_i = None
 
+                    # Prepere presence of features through the switch selection
+                    Presence = max(
+                        min(int(self.textbox_Presence_random2.get()), 100), 0
+                    )
                     if self.switch_Presence_geo.get() == 1:
                         # If range of presence is found set it in variable
                         Presence_i = max(
@@ -3399,8 +3659,7 @@ class OperationPage(tk.Frame):
                 except:
                     return messagebox.showwarning(
                         "Procedure Aborted",
-                        "Error: Some Values are missing\n"
-                        "Make sure it selected properly",
+                        "Some Values are missing\n" "Make sure it selected properly",
                     )
 
                 if saving_method == "Editor":
@@ -3415,7 +3674,6 @@ class OperationPage(tk.Frame):
                         self.controller.shared_data["EditorSavingPath"].get(),
                         self.Editor_Extraction_name.get() + ".txt",
                     )
-                    BuildingGeneratorVer = "0.9b"
 
                     Save_random_features(
                         saving_method,

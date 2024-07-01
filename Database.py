@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 
 
-def parse_dat_file(Path, arr, backup_path=None):
+def parse_dat_file(Path, arr, debugger=False, backup_path=None):
     Model_count = np.size(arr, 0)
     All_dimensions = np.zeros((Model_count, 6))
 
@@ -15,6 +15,8 @@ def parse_dat_file(Path, arr, backup_path=None):
                 Path, "Models", str(int(arr[model_num])), "Parent.dat"
             )
             file = open(model_path, "r")
+            if debugger:
+                print(f"model number {model_num} has been fetched")
         except FileNotFoundError:
             # if Folder of the model is missing in "Models" folder, take from Backup path the needed models
             if backup_path is not None:
@@ -22,7 +24,8 @@ def parse_dat_file(Path, arr, backup_path=None):
                     backup_path, "Models", str(int(arr[model_num])), "Parent.dat"
                 )
                 file = open(model_path, "r")
-
+                if debugger:
+                    print(f"model number {model_num} from Backup CT has been fetched")
         # Get dimensions of each model number through  hit box parameters
         with file:
             for line in file:
@@ -42,9 +45,13 @@ def parse_dat_file(Path, arr, backup_path=None):
 
         # Assign Sizes to all dimensions array
         if side_1 >= side_2:
-            All_dimensions[model_num, 0] = side_2  # width == X
+            All_dimensions[model_num, 0] = abs(
+                side_2
+            )  # width == X, abs is for fixing X if inverted
             All_dimensions[model_num, 1] = side_2_Offset  # width offset from center (X)
-            All_dimensions[model_num, 2] = side_1  # length == Y
+            All_dimensions[model_num, 2] = abs(
+                side_1
+            )  # length == Y , abs is for fixing Y if inverted
             All_dimensions[model_num, 3] = (
                 side_1_Offset  # length offset from center (Y)
             )
@@ -52,9 +59,13 @@ def parse_dat_file(Path, arr, backup_path=None):
             All_dimensions[model_num, 5] = 1  # length index position
 
         elif side_1 < side_2:
-            All_dimensions[model_num, 0] = side_1  # width == Y
+            All_dimensions[model_num, 0] = abs(
+                side_1
+            )  # width == Y,  abs is for fixing Y if inverted
             All_dimensions[model_num, 1] = side_1_Offset  # width offset from center (Y)
-            All_dimensions[model_num, 2] = side_2  # length == X
+            All_dimensions[model_num, 2] = abs(
+                side_2
+            )  # length == X,  abs is for fixing X if inverted
             All_dimensions[model_num, 3] = (
                 side_2_Offset  # length offset from center (X)
             )
@@ -130,7 +141,7 @@ def extract_class_data(xml_file_path):
     return Data_Array
 
 
-def GenerateDB(class_table_xml_path, save_path, Korea_CT_XML_path=None):
+def GenerateDB(class_table_xml_path, save_path, debugger=False, Korea_CT_XML_path=None):
     # Set Paths
     # Remove the file name from the directory path
     Base_Path = os.path.dirname(class_table_xml_path)
@@ -141,9 +152,13 @@ def GenerateDB(class_table_xml_path, save_path, Korea_CT_XML_path=None):
     data = extract_class_data(class_table_xml_path)
     # Extract Dimensions from parents files
     if Korea_CT_XML_path:
-        model_dimensions = parse_dat_file(Base_Path, data[:, 0], backup_Path)
+        if debugger:
+            print("********* Fetch data with Backup CT *********")
+        model_dimensions = parse_dat_file(Base_Path, data[:, 0], debugger, backup_Path)
     else:
-        model_dimensions = parse_dat_file(Base_Path, data[:, 0])
+        if debugger:
+            print("********* Fetch data *********")
+        model_dimensions = parse_dat_file(Base_Path, data[:, 0], debugger)
 
     # Extract features names
     features_names = extract_name_of_feature(Base_Path, data[:, 5])
@@ -214,4 +229,6 @@ def GenerateDB(class_table_xml_path, save_path, Korea_CT_XML_path=None):
     # Save data with SQL method
     conn = sqlite3.connect(saveTo)
     df.to_sql("MyTable", conn, if_exists="replace", index=False)
+    if debugger:
+        print("********* database.db saved successfully *********")
     conn.close()

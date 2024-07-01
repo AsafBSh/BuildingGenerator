@@ -131,7 +131,6 @@ def fitted_features(coordinates):
     #
     # # Set the title for the plot
     # plt.title('Fitted BB compared to real shape')
-
     rotation_angle, side_lengths = calc_rotation_and_side_lengths_via_slope(bondingBox)
 
     # print("Rotation Angle:", rotation_angle)

@@ -1,9 +1,12 @@
-import math
-import numpy as np
-import sqlite3
-import pandas as pd
-import matplotlib.pyplot as MatPlt
 import re
+import os
+import json
+import math
+import sqlite3
+import numpy as np
+import pandas as pd
+import tkinter as tk
+import matplotlib.pyplot as MatPlt
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
 
@@ -56,11 +59,20 @@ def Load_Db(path, feature_name="All"):
         elif number_conditions:
             query = f"SELECT * FROM MyTable WHERE {number_conditions}"
 
-    data_array = pd.read_sql_query(query, conn)
+    dataframe = pd.read_sql_query(query, conn)
 
     conn.close()
 
-    return data_array
+    # get size
+    num_rows, num_cols = dataframe.shape
+    # Generate random indices to ensure random load of data
+    np.random.seed(num_rows)  # To ensure reproducibility
+    selected_indices = np.random.choice(num_rows, size=num_rows, replace=False)
+
+    # Get the CT numbers and feature names for the selected indices
+    random_dataframe = dataframe.iloc[selected_indices]
+
+    return random_dataframe
 
 
 def Show_Selected_Features(buildings, Calc_data):
@@ -190,17 +202,15 @@ def Show_Selected_Features_2D(
             model_data = models_FrameData[
                 models_FrameData["CTNumber"].astype(str).str.contains(str(ct_number))
             ]
-            if not model_data.empty:
-                model_width, model_length = (
-                    model_data.iloc[0]["Width"],
-                    model_data.iloc[0]["Length"],
-                )
 
-                # Extract other parameters from the entry
-                y_distance, x_distance, z_height, rotation = map(
-                    float, entry_parts[1:5]
-                )
-                # Note!! returning the Y and X coordinations to its proper place after editor switching
+            model_width, model_length = (
+                model_data.iloc[0]["Width"],
+                model_data.iloc[0]["Length"],
+            )
+
+            # Extract other parameters from the entry
+            y_distance, x_distance, z_height, rotation = map(float, entry_parts[1:4])
+            # Note!! returning the Y and X coordinations to its proper place after editor switching
 
             # Calculate the corner points of the rectangle
             corner_points = np.array(
@@ -255,12 +265,11 @@ def Show_Selected_Features_3D(
     axes = []
 
     # Initialize variables to stor the min and max values for each axis
-    x_min, x_max, y_min, y_max, z_min, z_max = (
+    x_min, x_max, y_min, y_max, z_max = (
         float("inf"),
         float("-inf"),
         float("inf"),
         float("-inf"),
-        float("inf"),
         float("-inf"),
     )
 
@@ -274,7 +283,7 @@ def Show_Selected_Features_3D(
             feature = buildings.iloc[i]
             length = feature["length"]
             width = feature["width"]
-            height = feature["height"]
+            height = Calc_data[i, 1]
             rotation = (feature["rotation"] + 90) % 360
 
             # Extract radius and angle from calc_features
@@ -322,7 +331,6 @@ def Show_Selected_Features_3D(
             x_max = max(x_max, np.max(translated_corner_points[:, 0]))
             y_min = min(y_min, np.min(translated_corner_points[:, 1]))
             y_max = max(y_max, np.max(translated_corner_points[:, 1]))
-            z_min = min(z_min, np.min(translated_corner_points[:, 2]))
             z_max = max(z_max, np.max(translated_corner_points[:, 2]))
 
             # Create a 3D polygon and add it to the plot
@@ -341,11 +349,15 @@ def Show_Selected_Features_3D(
             for face in faces:
                 z = np.array([face[:, 2]])
                 verts = [list(zip(face[:, 0], face[:, 1], z[0]))]
-            ax.add_collection3d(
-                Poly3DCollection(
-                    verts, facecolors="blue", linewidths=1, edgecolors="r", alpha=0.25
+                ax.add_collection3d(
+                    Poly3DCollection(
+                        verts,
+                        facecolors="blue",
+                        linewidths=1,
+                        edgecolors="b",
+                        alpha=0.25,
+                    )
                 )
-            )
 
         axes[0].set_title("3D Selected Buildings from JSON")
 
@@ -442,7 +454,7 @@ def Show_Selected_Features_3D(
                         verts,
                         facecolors="blue",
                         linewidths=1,
-                        edgecolors="b",
+                        edgecolors="r",
                         alpha=0.25,
                     )
                 )
@@ -654,9 +666,7 @@ def Save_random_features(
             else:
                 presence = Presence_f
 
-            chance_of_presence = (
-                f"{int(presence)}#"  # We keep it as a string to include the '#' character
-            )
+            chance_of_presence = f"{int(presence)}#"  # We keep it as a string to include the '#' character
             count_of_features = f"{i})"  # 0-indexed count of features
             formatted_entry = (
                 f"FeatureEntry={ct_number} {x_distance:.4f} {y_distance:.4f} {z_height:.4f} {rotation:.4f} {int(value):04d} 0000 "
@@ -735,58 +745,119 @@ def Save_accurate_features(
     Presence_i,
     Values_i,
     auto_features_detection,
+    BuildingGeneratorVer,
     CT_Num=None,
     Obj_Num=None,
 ):
+    # Load Dictionary of integers for the feature's "value" if inputs are None
+    if Values_i is None and Values_f is None:
+        # Get the path of the current script and save the checkbox_dict to the file
+        own_path = os.path.dirname(os.path.realpath(__file__))
+        # Add your filename to the script's path
+        filename = "ValuesDic.json"
+        filepath = os.path.join(own_path, filename)
+        # Save the checkbox_dict to the file
+        try:
+            with open(filepath, "r") as f:
+                values_dict = json.load(f)
+            # fix issue if No dictionary is found or its empty
+            if len(values_dict) == 0:
+                tk.messagebox.showerror(
+                    "Error",
+                    "The values dictionary is empty, The proccedure will continue with Value == 10.",
+                )
+                Values_f = 10
+        except Exception:
+            tk.messagebox.showerror(
+                "Error",
+                "The values dictionary is not found, The proccedure will continue with Value == 10.",
+            )
+            Values_f = 10
+
     if SaveType == "Editor":
         BMSver = 38
-        BuildingGeneratorVer = "0.9b"
         feature_entries = []
         for select in range(0, len(Selected_GeoFeatures)):
+            Auto_BMSModels = None  # Will initiate None for every iteration and will be overriten if auto found feature
             if auto_features_detection:
                 Auto_BMSModels = Auto_Selected(
                     Db_path, Selected_GeoFeatures.iloc[select]
                 )
-                if Auto_BMSModels is not None:
-                    AllBMSModels = Auto_BMSModels
 
             ## Get the most suited BMS model to the selected Geo Structure
             corrent_model_idx, closest_distance = Decision_Algo(
                 Selected_GeoFeatures,
                 Selected_CalcData_GeoFeatures,
                 select,
-                AllBMSModels,
+                Auto_BMSModels if Auto_BMSModels is not None else AllBMSModels,
                 selection_option,
             )
 
-            # Get CT and name of the selected model
-            ct_number = AllBMSModels.iloc[corrent_model_idx]["CTNumber"]
-            feature_name = AllBMSModels.iloc[corrent_model_idx]["FeatureName"]
+            if Auto_BMSModels is not None:
+                # If Auto BMS models is found, then assign the data through the list of new models
+                ct_number = Auto_BMSModels.iloc[corrent_model_idx]["CTNumber"]
+                feature_name = Auto_BMSModels.iloc[corrent_model_idx]["FeatureName"]
+                rotation = Rotation_Definer(
+                    Selected_GeoFeatures.iloc[select]["rotation"],
+                    Auto_BMSModels.iloc[corrent_model_idx]["LengthIdx"],
+                )
+                ## For Euclidian coordination
+                # calculate new offset by  r from Radius offsets, then rotation is always from y, therefore
+                # x_off_new = r*sin(ang), y_off_new = r*cos(ang)
+                r_offset = math.sqrt(
+                    Auto_BMSModels.iloc[corrent_model_idx]["LengthOff"] ** 2
+                    + Auto_BMSModels.iloc[corrent_model_idx]["WidthOff"] ** 2
+                )
+                x_distance = Selected_CalcData_GeoFeatures[
+                    select, 5
+                ] - r_offset * math.sin(rotation)  # XXX in feet
+                y_distance = Selected_CalcData_GeoFeatures[
+                    select, 6
+                ] - r_offset * math.cos(rotation)  # YYY in feet
 
-            ## For Euclidian coordination
-            x_distance = Selected_CalcData_GeoFeatures[select, 5]  # XXX in feet
-            y_distance = Selected_CalcData_GeoFeatures[select, 6]  # YYY in feet
+            else:
+                # If auto failed, then continue with all models of BMS
+                # Get CT and name of the selected model
+                ct_number = AllBMSModels.iloc[corrent_model_idx]["CTNumber"]
+                feature_name = AllBMSModels.iloc[corrent_model_idx]["FeatureName"]
+                rotation = Rotation_Definer(
+                    Selected_GeoFeatures.iloc[select]["rotation"],
+                    AllBMSModels.iloc[corrent_model_idx]["LengthIdx"],
+                )
+                ## For Euclidian coordination
+                # calculate new offset by  r from Radius offsets, then rotation is always from y, therefore
+                # x_off_new = r*sin(ang), y_off_new = r*cos(ang)
+                r_offset = math.sqrt(
+                    AllBMSModels.iloc[corrent_model_idx]["LengthOff"] ** 2
+                    + AllBMSModels.iloc[corrent_model_idx]["WidthOff"] ** 2
+                )
+                x_distance = Selected_CalcData_GeoFeatures[
+                    select, 5
+                ] - r_offset * math.sin(rotation)  # XXX in feet
+                y_distance = Selected_CalcData_GeoFeatures[
+                    select, 6
+                ] - r_offset * math.cos(rotation)  # YYY in feet
 
             z_height = (
                 0  # You can set the height as needed, here we assume a height of 0 feet
             )
-            rotation = Rotation_Definer(
-                Selected_GeoFeatures.iloc[select]["rotation"],
-                AllBMSModels.iloc[corrent_model_idx]["LengthIdx"],
-            )
 
-            if Values_i:
+            if Values_i is not None and Values_f is not None:
                 value = np.random.uniform(Values_i, Values_f)
-            else:
+            elif Values_f is not None:
                 value = Values_f
+            else:
+                if Auto_BMSModels is None:
+                    models_type = AllBMSModels.iloc[corrent_model_idx]["Type"]
+                else:
+                    models_type = Auto_BMSModels.iloc[corrent_model_idx]["Type"]
+                value = values_dict[str(models_type)]["Value"]
             # Apply random presence if initial presence is available
-            if Presence_i:
+            if Presence_i is not None:
                 presence = np.random.uniform(Presence_i, Presence_f)
             else:
                 presence = Presence_f
-            chance_of_presence = (
-                f"{int(presence)}#"  # We keep it as a string to include the '#' character
-            )
+            chance_of_presence = f"{int(presence)}#"  # We keep it as a string to include the '#' character
 
             point_link = -1
             count_of_features = f"{select})"  # 0-indexed count of features
@@ -800,7 +871,7 @@ def Save_accurate_features(
         # Write the formatted data to a file in the Falcon BMS format
         with open(SavePath, "w") as output_file:
             output_file.write(
-                f"# BMS-BuildingGenerator (v{BuildingGeneratorVer} alpha) for FalconEditor - Objective Data\n\n"
+                f"# BMS-BuildingGenerator (v{BuildingGeneratorVer}) for FalconEditor - Objective Data\n\n"
             )
             output_file.write(
                 f"# Objective original location in Falcon World (Falcon BMS 4.{BMSver} with New Terrain)\n# ObjX: {AOI_center[0]} \n# ObjY: {AOI_center[1]}\n\n"
@@ -830,33 +901,100 @@ def Auto_Selected(Db_path, Selected_GeoFeature):
         fillters.extend(["66", "sport"])
 
     if Selected_GeoFeature["religion"]:
-        fillters.extend(["7", "40"])
+        if Selected_GeoFeature["religion"].lower == "muslim":
+            fillters.extend(["minaret", "mosque"])
+        elif Selected_GeoFeature["religion"].lower == "jewish":
+            fillters.extend(["synagogue"])
+        elif Selected_GeoFeature["religion"].lower == "christian":
+            fillters.extend(["church", "presbytery", "cathedral", "chapel"])
+        elif Selected_GeoFeature["religion"].lower in ["buddhist", "shinto"]:
+            fillters.extend(["temple", "shrine", "monastery"])
+        else:
+            fillters.extend(["7", "40"])
 
-    if (
-        Selected_GeoFeature["building"]
-        and Selected_GeoFeature["building"].lower() == "hangar"
-    ):
-        fillters.extend(["39", "45"])
+    if Selected_GeoFeature["building"]:
+        if Selected_GeoFeature["building"].lower() == "hangar":
+            fillters.extend(["HAS", "hangar", "FT Shelter"])
+        elif Selected_GeoFeature["building"].lower() in ["mosque", "minaret", "muslim"]:
+            fillters.extend(["minaret", "mosque"])
+        elif Selected_GeoFeature["building"].lower() in [
+            "cathedral",
+            "chapel",
+            "presbytery",
+        ]:
+            fillters.extend(
+                ["church", "presbytery", "cathedral", "chapel", "monastery"]
+            )
+        elif Selected_GeoFeature["building"].lower() == "synagogue":
+            fillters.extend(["synagogue"])
+        elif Selected_GeoFeature["building"].lower() == "shrine":
+            fillters.extend(["shrine"])
+        elif Selected_GeoFeature["building"].lower() == "temple":
+            fillters.extend(["temple", "monastery"])
+
+    if Selected_GeoFeature["aeroway"]:
+        heli = ["heliport", "helipad"]
+        if Selected_GeoFeature["aeroway"].lower() == "terminal":
+            fillters.extend(["terminal"])
+        elif Selected_GeoFeature["aeroway"].lower() == "apron":
+            fillters.extend(["39", "45", "hangar", "terminal", "depot", "warehouse"])
+        elif Selected_GeoFeature["aeroway"].lower() in heli:
+            fillters.extend(["helipad", "13"])
+        elif Selected_GeoFeature["aeroway"].lower() == "windsock":
+            fillters.extend(["windsock"])
+        elif Selected_GeoFeature["aeroway"].lower() == "arresting_gear":
+            fillters.extend(["68"])
+        elif Selected_GeoFeature["aeroway"].lower() == "navigationaid":
+            fillters.extend(["25", "localizer", "tacan", "beacon"])
+        elif Selected_GeoFeature["aeroway"].lower() == "tower":
+            fillters.extend(["2"])
 
     if Selected_GeoFeature["barrier"]:
         if Selected_GeoFeature["barrier"].lower() == "border_control":
             fillters.extend(["55"])
-        if Selected_GeoFeature["barrier"].lower() == "fence":
+        elif Selected_GeoFeature["barrier"].lower() == "fence":
             fillters.extend(["49"])
 
     if Selected_GeoFeature["man_made"]:
-        antennas = ["communications_tower", "antenna", "satellite_dish", "telescope"]
         fire_poles = ["flare", "chimney"]
-        if Selected_GeoFeature["man_made"].lower() in antennas:
-            fillters.extend(["29", "43", "antenna", "33", "28"])
-        if Selected_GeoFeature["man_made"].lower() == "tower":
-            fillters.extend(["61", "tower"])
         if Selected_GeoFeature["man_made"].lower() == "beacon":
             fillters.extend(["beacon"])
-        if Selected_GeoFeature["man_made"].lower() == "cooling_tower":
-            fillters.extend(["53"])
-        if Selected_GeoFeature["man_made"].lower() in fire_poles:
+        elif Selected_GeoFeature["man_made"].lower() in fire_poles:
             fillters.extend(["61", "51"])
+        elif Selected_GeoFeature["man_made"].lower() == "lighting":
+            fillters.extend(["46", "lights", "light"])
+
+    ## If there is tower somewhere, its need to be selected "once", with the aligned purposed (and prevent multiple purposes)
+    if Selected_GeoFeature["tower"]:
+        watch_tower = ["watchtower", "observation"]
+        antennas = ["monitoring", "communication", "na"]
+        if Selected_GeoFeature["tower"].lower() in watch_tower:
+            fillters.extend(["Watchtower"])
+        elif Selected_GeoFeature["tower"].lower() in antennas:
+            fillters.extend(["29"])
+        elif Selected_GeoFeature["tower"].lower() == "lighting":
+            fillters.extend(["46", "lights", "light"])
+        elif Selected_GeoFeature["tower"].lower() == "minaret":
+            fillters.extend(["minaret", "mosque"])
+        elif Selected_GeoFeature["tower"].lower() == "radar":
+            fillters.extend(["radar"])
+        elif Selected_GeoFeature["tower"].lower() in ["control", "traffic"]:
+            fillters.extend(["2"])
+
+    elif Selected_GeoFeature["man_made"]:
+        antennas = ["communications_tower", "antenna", "satellite_dish", "telescope"]
+        if Selected_GeoFeature["man_made"].lower() == "tower":
+            if (
+                Selected_GeoFeature["service"]
+                and Selected_GeoFeature["service"].lower() == "aircraft_control"
+            ):
+                fillters.extend(["2"])
+            else:
+                fillters.extend(["61", "tower"])
+        elif Selected_GeoFeature["man_made"].lower() == "cooling_tower":
+            fillters.extend(["53"])
+        elif Selected_GeoFeature["man_made"].lower() in antennas:
+            fillters.extend(["29", "43", "antenna", "33", "28", "satellite"])
 
     if Selected_GeoFeature["power"]:
         Power = [
@@ -870,25 +1008,26 @@ def Auto_Selected(Db_path, Selected_GeoFeature):
         electric_tower = ["tower", "terminal", "connection"]
         if Selected_GeoFeature["power"].lower() in Power:
             fillters.extend(["23", "converter", "32"])
-        if Selected_GeoFeature["power"].lower() in electric_tower:
+        elif Selected_GeoFeature["power"].lower() in electric_tower:
             fillters.extend(["20"])
 
-    factory = ["pipeline", "pump", "pumping_station", "works"]
-    fuel_storage = ["gasometer", "storage_tank"]
     if (
         Selected_GeoFeature["man_made"]
-        and Selected_GeoFeature["man_made"].lower() in factory
+        and Selected_GeoFeature["man_made"].lower()
+        in ["pipeline", "pump", "pumping_station", "works"]
         or Selected_GeoFeature["building"]
         and Selected_GeoFeature["building"].lower() == "industrial"
     ):
         fillters.extend(["32", "53", "60", "56", "23", "6"])
     if (
         Selected_GeoFeature["building"]
-        and Selected_GeoFeature["building"].lower() in fuel_storage
+        and Selected_GeoFeature["building"].lower()
+        in ["gasometer", "storage_tank", "fuel"]
         or Selected_GeoFeature["man_made"]
-        and Selected_GeoFeature["man_made"].lower() in fuel_storage
+        and Selected_GeoFeature["man_made"].lower()
+        in ["gasometer", "storage_tank", "fuel"]
     ):
-        fillters.extend(["48", "10"])
+        fillters.extend(["48", "10", "fuel"])
     if (
         Selected_GeoFeature["building"]
         and Selected_GeoFeature["building"].lower() == "silo"
@@ -904,12 +1043,11 @@ def Auto_Selected(Db_path, Selected_GeoFeature):
     ):
         fillters.extend(["37"])
 
-    bridge_cap = ["bridge", "bridges"]
     if (
         Selected_GeoFeature["building"]
-        and Selected_GeoFeature["building"].lower() in bridge_cap
+        and Selected_GeoFeature["building"].lower() in ["bridge", "bridges"]
         or Selected_GeoFeature["man_made"]
-        and Selected_GeoFeature["man_made"].lower() in bridge_cap
+        and Selected_GeoFeature["man_made"].lower() in ["bridge", "bridges"]
         or Selected_GeoFeature["bridge"]
     ):
         fillters.extend(["16"])
@@ -924,6 +1062,7 @@ def Auto_Selected(Db_path, Selected_GeoFeature):
 
     if (
         Selected_GeoFeature["military"]
+        and Selected_GeoFeature["military"].lower() == "bunker"
         or Selected_GeoFeature["building"]
         and Selected_GeoFeature["building"].lower() == "bunker"
     ):
@@ -934,8 +1073,16 @@ def Auto_Selected(Db_path, Selected_GeoFeature):
         Selected_GeoFeature["building"]
         and Selected_GeoFeature["building"].lower() in barracks
         or Selected_GeoFeature["military"]
+        and Selected_GeoFeature["military"].lower() in barracks
     ):
         fillters.extend(["12", "35", "10"])
+
+    if Selected_GeoFeature["military"] and Selected_GeoFeature["military"].lower() in [
+        "ammo",
+        "ammunition",
+        "munition",
+    ]:
+        fillters.extend(["ammo", "ammunition", "munition", "bunker"])
 
     # convert list into string
     filters_str = ", ".join(fillters)
