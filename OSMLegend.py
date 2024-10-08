@@ -77,7 +77,7 @@ class OSMLegend(tk.Toplevel):
         window.tree.insert(
             building,
             "end",
-            values=("fuel, gasometer, storage_tank", "fuel", "Depot,Storage Tank"),
+            values=("fuel, gasometer, storage_tank", "fuel, gas", "Storage Tank"),
         )
         window.tree.insert(
             building, "end", values=("hangar", "HAS, hangar, FT Shelter")
@@ -105,21 +105,28 @@ class OSMLegend(tk.Toplevel):
             man_made,
             "end",
             values=(
-                "communications_tower, antenna, satellite_dish, telescope",
+                "antenna, satellite_dish, telescope",
                 "antenna, satellite",
                 "R Tower, Radars, SAM, TV Station",
             ),
         )
         window.tree.insert(
-            man_made, "end", values=("cooling_tower", "", "Cooling Tower")
+            man_made,
+            "end",
+            values=("communications_tower", "Radio Tower, Telecom Tower"),
         )
         window.tree.insert(
-            man_made, "end", values=("flare, chimney", "", "Smoke Stack, Tower")
+            man_made, "end", values=("cooling_tower", "", "Cooling Tower")
         )
         window.tree.insert(
             man_made,
             "end",
-            values=("gasometer, storage_tank,fuel", "fuel", "Depot,Storage Tank"),
+            values=("flare, chimney", " Release Value", "Smoke Stack, Tower"),
+        )
+        window.tree.insert(
+            man_made,
+            "end",
+            values=("gasometer, storage_tank,fuel", "fuel, gas", "Storage Tank"),
         )
         window.tree.insert(
             man_made, "end", values=("lighting", "lights,light", "Lights")
@@ -129,11 +136,12 @@ class OSMLegend(tk.Toplevel):
             man_made,
             "end",
             values=(
-                "pipeline, pump, pumping_station, works",
+                "pump, pumping_station, works",
                 "",
                 "Refinery, Cooling Tower, Chemical Plants, Power Plant, Factories, Transformer",
             ),
         )
+        window.tree.insert(man_made, "end", values=("pipeline", "piping"))
         window.tree.insert(man_made, "end", values=("silo", "silo"))
         window.tree.insert(man_made, "end", values=("tower", "", "Control Tower"))
         window.tree.insert(man_made, "end", values=("water_tower", "", "Water Tower"))
@@ -164,7 +172,7 @@ class OSMLegend(tk.Toplevel):
             "end",
             values=("barrack, barracks", "", "Warehouse, Barracks, Depot"),
         )
-        window.tree.insert(military, "end", values=("bunker", "", "Bunker"))
+        window.tree.insert(military, "end", values=("bunker", "bunker", "Bunker"))
 
         # Add power items
         power = window.tree.insert("", "end", text="power")
@@ -173,15 +181,16 @@ class OSMLegend(tk.Toplevel):
             power,
             "end",
             values=(
-                "compensator, converter, plant, substation, transformer",
-                "converter",
+                "compensator, plant, substation",
+                "converter, Processor",
                 "Power Plant, Refinery",
             ),
         )
         window.tree.insert(
             power, "end", values=("tower, terminal, connection", "", "Power Tower")
         )
-
+        window.tree.insert(power, "end", values=("converter", "converter"))
+        window.tree.insert(power, "end", values=("transformer", "transformer"))
         # Add sport items
         sport = window.tree.insert("", "end", text="sport")
         # Children for sport
@@ -203,9 +212,11 @@ class OSMLegend(tk.Toplevel):
         )
         window.tree.insert(tower, "end", values=("lighting", "lights,light", "Lights"))
         window.tree.insert(tower, "end", values=("minaret", "minaret, mosque"))
+        window.tree.insert(tower, "end", values=("monitoring, na", "", "R Tower"))
         window.tree.insert(
-            tower, "end", values=("monitoring, communication, na", "", "R Tower")
+            tower, "end", values=("communication", "Radio Tower, Telecom Tower")
         )
+
         window.tree.insert(tower, "end", values=("radar", "radar"))
         window.tree.insert(
             tower, "end", values=("watchtower, observation", "Watchtower")
@@ -226,6 +237,14 @@ class OSMLegend(tk.Toplevel):
         window.tree.insert(religion, "end", values=("muslim", "minaret, mosque"))
         window.tree.insert(
             religion, "end", values=("anything else", "", "Shrine, Church")
+        )
+        # Add bms items
+        bms = window.tree.insert("", "end", text="bms")
+        # Children for bms
+        window.tree.insert(
+            bms,
+            "end",
+            values=("'Name of a feature'", "Will search for the features requested"),
         )
 
         # Make the window always appear on top

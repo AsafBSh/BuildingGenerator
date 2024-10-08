@@ -1,14 +1,17 @@
 import re
-import os
+import time
+import gzip
 import json
 import math
 import sqlite3
 import numpy as np
 import pandas as pd
-import tkinter as tk
+from tkinter import messagebox
+from pathlib import Path
 import matplotlib.pyplot as MatPlt
+from scipy.spatial.distance import cdist
+from collections import defaultdict, Counter
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
-
 
 # Load the data from the database
 def Load_Db(path, feature_name="All"):
@@ -209,7 +212,8 @@ def Show_Selected_Features_2D(
             )
 
             # Extract other parameters from the entry
-            y_distance, x_distance, z_height, rotation = map(float, entry_parts[1:4])
+            y_distance, x_distance = map(float, entry_parts[1:3])
+            rotation = float(entry_parts[4])
             # Note!! returning the Y and X coordinations to its proper place after editor switching
 
             # Calculate the corner points of the rectangle
@@ -544,53 +548,57 @@ def filter_structures(
     return Raw_Geo_Data.iloc[selected_indices], Geo_Data.iloc[selected_indices]
 
 
-def Decision_Algo(GeoFeature, GeoFeatureData, Geo_Idx, selected_BMSModels, State="3D"):
-    """Iterates for every BMS model and find the must appropriate feature based on the critiria"""
-    # Define starting points
-    corrent_model_idx = 0
-    closest_distance = 10**9
+def Decision_Algo(
+    GeoFeature,
+    GeoFeatureData,
+    Geo_Idx,
+    selected_BMSModels,
+    floor_height,
+    State,
+    num_floors=0,
+):
+    """
+    Find the most appropriate BMS model based on the given criteria.
+
+    Args:
+        GeoFeature (pd.DataFrame): Geographic features of structures.
+        GeoFeatureData (np.array): Additional data for geographic features.
+        Geo_Idx (int): Index of the current geographic feature.
+        selected_BMSModels (pd.DataFrame): Available BMS models.
+        floor_height (float): Height of each floor.
+        State (str): Dimension state, either "3D" or "2D".
+        num_floors (float): Average number of floors to add. Default is 0.
+
+    Returns:
+        tuple: Index of the most appropriate model and its distance.
+    """
+    SingleStructure = GeoFeature.iloc[Geo_Idx]
+
+    # Prepare structure dimensions
+    structure_dims = [SingleStructure["width"], SingleStructure["length"]]
 
     if State == "3D":
         # Include Height in the distance calculation
-        for model in range(0, len(selected_BMSModels)):
-            SingleStructure_FrameData = GeoFeature.iloc[Geo_Idx]  # FrameData Type
-            SingleStructure_Height = GeoFeatureData[Geo_Idx, 1]  # Numpy Array Type
+        SingleStructure_Height = GeoFeatureData[Geo_Idx, 1]
 
-            # Distance value consider abs of substraction of model and building specific sizem then adding them into solid one value
-            width_dist = abs(
-                SingleStructure_FrameData["width"]
-                - selected_BMSModels.iloc[model]["Width"]
-            )
-            length_dist = abs(
-                SingleStructure_FrameData["length"]
-                - selected_BMSModels.iloc[model]["Length"]
-            )
-            height_dist = abs(
-                SingleStructure_Height - selected_BMSModels.iloc[model]["Height"]
-            )
-            calc_dist = math.sqrt(width_dist**2 + length_dist**2 + height_dist**2)
-            if calc_dist < closest_distance:
-                corrent_model_idx = model
-                closest_distance = calc_dist
+        if num_floors > 0:
+            # Generate a random number of floors from a Gaussian distribution
+            additional_floors = max(0, np.random.normal(num_floors, num_floors / 2))
+            # Calculate additional height and add it to the original height
+            SingleStructure_Height += np.abs(additional_floors * floor_height)
+        structure_dims.append(SingleStructure_Height)
 
-    elif State == "2D":
-        # Iterate through Models
-        # Don't include Height in the distance calculation
-        for model in range(0, len(selected_BMSModels)):
-            SingleStructure_FrameData = GeoFeature.iloc[Geo_Idx]
-            # Distance value consider abs of substraction of model and building specific sizem then adding them into solid one value
-            width_dist = abs(
-                SingleStructure_FrameData["width"]
-                - selected_BMSModels.iloc[model]["Width"]
-            )
-            length_dist = abs(
-                SingleStructure_FrameData["length"]
-                - selected_BMSModels.iloc[model]["Length"]
-            )
-            calc_dist = math.sqrt(width_dist**2 + length_dist**2)
-            if calc_dist < closest_distance:
-                corrent_model_idx = model
-                closest_distance = calc_dist
+    # Prepare model dimensions
+    model_dims = selected_BMSModels[["Width", "Length"]]
+    if State == "3D":
+        model_dims = model_dims.join(selected_BMSModels["Height"])
+
+    # Calculate distances
+    distances = cdist([structure_dims], model_dims.values, metric="euclidean")
+
+    # Find the index of the minimum distance
+    corrent_model_idx = np.argmin(distances)
+    closest_distance = np.min(distances)
 
     return corrent_model_idx, closest_distance
 
@@ -606,16 +614,17 @@ def Rotation_Definer(Angle, BMS_Length_idx):
 
 
 def Assign_features_randomly(num_features, radius, DB_path, DB_restrictions):
+
     # Load the database file containing the features data (mydatabase.db)
     AllBMSModels = Load_Db(DB_path, DB_restrictions)  # Options ModelNum, Name, Type
 
     if len(AllBMSModels) == 0:
         return TypeError
-    # Generate random indices to select 'apartment' features
-    np.random.seed(num_features)  # To ensure reproducibility
-    selected_indices = np.random.choice(len(AllBMSModels), num_features, replace=True)
 
-    # Get the CT numbers and feature names for the selected indices
+
+    np.random.seed(int(time.time()))
+    # Randomly select features
+    selected_indices = np.random.choice(len(AllBMSModels), num_features, replace=False)
     selected_data = AllBMSModels.iloc[selected_indices]
 
     # Generate random coordinates within the specified radius
@@ -639,56 +648,49 @@ def Save_random_features(
     Values_f,
     Presence_i,
     Values_i,
+    sort_option,
     CT_Num=None,
     Obj_Num=None,
 ):
-    if SaveType == "Editor":
-        # Format the FeatureEntry data for each 'apartment' feature
-        feature_entries = []
-        for i, (x, y) in enumerate(zip(x_coordinates, y_coordinates)):
-            ct_number = selected_data.iloc[i]["CTNumber"]
-            feature_name = selected_data.iloc[i]["FeatureName"]
-            x_distance = x
-            y_distance = y
-            z_height = (
-                0  # You can set the height as needed, here we assume a height of 0 feet
-            )
-            rotation = np.random.uniform(0, 360)
-            # Apply random value if initial value is available
-            if Values_i:
-                value = np.random.uniform(Values_i, Values_f)
-            else:
-                value = Values_f
-            point_link = -1
-            # Apply random presence if initial presence is available
-            if Presence_i:
-                presence = np.random.uniform(Presence_i, Presence_f)
-            else:
-                presence = Presence_f
 
-            chance_of_presence = f"{int(presence)}#"  # We keep it as a string to include the '#' character
-            count_of_features = f"{i})"  # 0-indexed count of features
-            formatted_entry = (
-                f"FeatureEntry={ct_number} {x_distance:.4f} {y_distance:.4f} {z_height:.4f} {rotation:.4f} {int(value):04d} 0000 "
-                f"{point_link} {chance_of_presence} {count_of_features} {feature_name}"
-            )
-            feature_entries.append(formatted_entry)
+    feature_entries = []
+    feature_types = []
 
-        # Write the formatted data to a file in the Falcon BMS format
-        with open(output_file_path, "w") as output_file:
-            output_file.write(
-                f"# BMS-BuildingGenerator (v{BuildingGeneratorVer} alpha) for FalconEditor - Objective Data\n\n"
-            )
-            output_file.write("Version=6\n\n")
-            output_file.write(
-                f"# FeatureEntries {num_features}\n\n"
-            )  # set to amount of features
-            for entry in feature_entries:
-                output_file.write(entry + "\n")
-            output_file.write("\n# Point Headers 0\n")
+    # Iterate through each feature to be generated
+    for i, (x, y) in enumerate(zip(x_coordinates, y_coordinates)):
+        # Extract data for the current feature
+        ct_number = selected_data.iloc[i]["CTNumber"]
+        feature_name = selected_data.iloc[i]["FeatureName"]
+        feature_type = selected_data.iloc[i]["Type"]
 
-    # if SaveType == "BMS":
+        # Set coordinates and height
+        x_distance = x
+        y_distance = y
+        z_height = 0
 
+        # Generate random rotation
+        rotation = np.random.uniform(0, 360)
+
+        # Generate random value and presence based on input parameters
+        value = get_value(Values_i, Values_f, feature_type)
+        presence = np.random.uniform(Presence_i, Presence_f) if Presence_i is not None else Presence_f
+
+        formatted_entry = format_entry(ct_number, y_distance, x_distance, rotation, value, presence, i,
+                                       feature_name)
+        feature_entries.append(formatted_entry)
+        feature_types.append(feature_type)
+
+        # After creating all feature_entries, sort them if needed
+        if sort_option != "None":
+            feature_entries = sort_feature_entries(feature_entries, sort_option)
+
+    # Write the formatted data to a file in the Falcon BMS format
+    write_to_file(output_file_path, BuildingGeneratorVer, [0,0], num_features, feature_entries)
+
+    # Update statistics with the new features
+    update_statistics(num_features, feature_types)
+
+    return feature_entries
 
 def Assign_features_accuratly(
     num_features,
@@ -746,151 +748,202 @@ def Save_accurate_features(
     Values_i,
     auto_features_detection,
     BuildingGeneratorVer,
+    sort_option,
+    floor_height,
+    num_floors,
     CT_Num=None,
     Obj_Num=None,
 ):
-    # Load Dictionary of integers for the feature's "value" if inputs are None
-    if Values_i is None and Values_f is None:
-        # Get the path of the current script and save the checkbox_dict to the file
-        own_path = os.path.dirname(os.path.realpath(__file__))
-        # Add your filename to the script's path
-        filename = "ValuesDic.json"
-        filepath = os.path.join(own_path, filename)
-        # Save the checkbox_dict to the file
-        try:
-            with open(filepath, "r") as f:
-                values_dict = json.load(f)
-            # fix issue if No dictionary is found or its empty
-            if len(values_dict) == 0:
-                tk.messagebox.showerror(
-                    "Error",
-                    "The values dictionary is empty, The proccedure will continue with Value == 10.",
-                )
-                Values_f = 10
-        except Exception:
-            tk.messagebox.showerror(
-                "Error",
-                "The values dictionary is not found, The proccedure will continue with Value == 10.",
-            )
-            Values_f = 10
+    # Seed the random number generator for reproducibility
+    np.random.seed(int(time.time()))
 
-    if SaveType == "Editor":
-        BMSver = 38
-        feature_entries = []
-        for select in range(0, len(Selected_GeoFeatures)):
-            Auto_BMSModels = None  # Will initiate None for every iteration and will be overriten if auto found feature
-            if auto_features_detection:
-                Auto_BMSModels = Auto_Selected(
-                    Db_path, Selected_GeoFeatures.iloc[select]
-                )
+    #  initialize lists
+    feature_entries = []
+    feature_types = []
 
-            ## Get the most suited BMS model to the selected Geo Structure
-            corrent_model_idx, closest_distance = Decision_Algo(
-                Selected_GeoFeatures,
-                Selected_CalcData_GeoFeatures,
-                select,
-                Auto_BMSModels if Auto_BMSModels is not None else AllBMSModels,
-                selection_option,
-            )
+    # Iterate through each selected geographic feature
+    for select in range(len(Selected_GeoFeatures)):
+        # Auto-select BMS models if enabled
+        Auto_BMSModels = Auto_Selected(Db_path, Selected_GeoFeatures.iloc[select]) if auto_features_detection else None
+        Models = Auto_BMSModels if Auto_BMSModels is not None else AllBMSModels
 
-            if Auto_BMSModels is not None:
-                # If Auto BMS models is found, then assign the data through the list of new models
-                ct_number = Auto_BMSModels.iloc[corrent_model_idx]["CTNumber"]
-                feature_name = Auto_BMSModels.iloc[corrent_model_idx]["FeatureName"]
-                rotation = Rotation_Definer(
-                    Selected_GeoFeatures.iloc[select]["rotation"],
-                    Auto_BMSModels.iloc[corrent_model_idx]["LengthIdx"],
-                )
-                ## For Euclidian coordination
-                # calculate new offset by  r from Radius offsets, then rotation is always from y, therefore
-                # x_off_new = r*sin(ang), y_off_new = r*cos(ang)
-                r_offset = math.sqrt(
-                    Auto_BMSModels.iloc[corrent_model_idx]["LengthOff"] ** 2
-                    + Auto_BMSModels.iloc[corrent_model_idx]["WidthOff"] ** 2
-                )
-                x_distance = Selected_CalcData_GeoFeatures[
-                    select, 5
-                ] - r_offset * math.sin(rotation)  # XXX in feet
-                y_distance = Selected_CalcData_GeoFeatures[
-                    select, 6
-                ] - r_offset * math.cos(rotation)  # YYY in feet
+        # Use Decision_Algo to find the best model
+        corrent_model_idx, closest_distance = Decision_Algo(
+            Selected_GeoFeatures, Selected_CalcData_GeoFeatures, select,
+            Models, floor_height, selection_option, num_floors
+        )
 
-            else:
-                # If auto failed, then continue with all models of BMS
-                # Get CT and name of the selected model
-                ct_number = AllBMSModels.iloc[corrent_model_idx]["CTNumber"]
-                feature_name = AllBMSModels.iloc[corrent_model_idx]["FeatureName"]
-                rotation = Rotation_Definer(
-                    Selected_GeoFeatures.iloc[select]["rotation"],
-                    AllBMSModels.iloc[corrent_model_idx]["LengthIdx"],
-                )
-                ## For Euclidian coordination
-                # calculate new offset by  r from Radius offsets, then rotation is always from y, therefore
-                # x_off_new = r*sin(ang), y_off_new = r*cos(ang)
-                r_offset = math.sqrt(
-                    AllBMSModels.iloc[corrent_model_idx]["LengthOff"] ** 2
-                    + AllBMSModels.iloc[corrent_model_idx]["WidthOff"] ** 2
-                )
-                x_distance = Selected_CalcData_GeoFeatures[
-                    select, 5
-                ] - r_offset * math.sin(rotation)  # XXX in feet
-                y_distance = Selected_CalcData_GeoFeatures[
-                    select, 6
-                ] - r_offset * math.cos(rotation)  # YYY in feet
+        # Extract model information
+        model = Models.iloc[corrent_model_idx]
+        ct_number, feature_name = model['CTNumber'], model['FeatureName']
+        rotation = Rotation_Definer(Selected_GeoFeatures.iloc[select]['rotation'], model['LengthIdx'])
 
-            z_height = (
-                0  # You can set the height as needed, here we assume a height of 0 feet
-            )
+        # Calculate offset and distances
+        r_offset = np.sqrt(model['LengthOff']**2 + model['WidthOff']**2)
+        x_distance = Selected_CalcData_GeoFeatures[select, 5] - r_offset * np.sin(rotation)
+        y_distance = Selected_CalcData_GeoFeatures[select, 6] - r_offset * np.cos(rotation)
 
-            if Values_i is not None and Values_f is not None:
-                value = np.random.uniform(Values_i, Values_f)
-            elif Values_f is not None:
-                value = Values_f
-            else:
-                if Auto_BMSModels is None:
-                    models_type = AllBMSModels.iloc[corrent_model_idx]["Type"]
-                else:
-                    models_type = Auto_BMSModels.iloc[corrent_model_idx]["Type"]
-                value = values_dict[str(models_type)]["Value"]
-            # Apply random presence if initial presence is available
-            if Presence_i is not None:
-                presence = np.random.uniform(Presence_i, Presence_f)
-            else:
-                presence = Presence_f
-            chance_of_presence = f"{int(presence)}#"  # We keep it as a string to include the '#' character
+        # Get value and presence
+        value = get_value(Values_i, Values_f, model['Type'])
+        presence = np.random.uniform(Presence_i, Presence_f) if Presence_i is not None else Presence_f
 
-            point_link = -1
-            count_of_features = f"{select})"  # 0-indexed count of features
-            # Note! Editor switched the x and y coordinates
-            formatted_entry = (
-                f"FeatureEntry={ct_number} {y_distance:.4f} {x_distance:.4f} {z_height:.4f} {rotation:.4f} {int(value):04d} 0000 "
-                f"{point_link} {chance_of_presence} {count_of_features} {feature_name}"
-            )
-            feature_entries.append(formatted_entry)
+        # Format and append the entry
+        formatted_entry = format_entry(ct_number, y_distance, x_distance, rotation, value, presence, select, feature_name)
+        feature_entries.append(formatted_entry)
+        feature_types.append(model['Type'])
 
-        # Write the formatted data to a file in the Falcon BMS format
-        with open(SavePath, "w") as output_file:
-            output_file.write(
-                f"# BMS-BuildingGenerator (v{BuildingGeneratorVer}) for FalconEditor - Objective Data\n\n"
-            )
-            output_file.write(
-                f"# Objective original location in Falcon World (Falcon BMS 4.{BMSver} with New Terrain)\n# ObjX: {AOI_center[0]} \n# ObjY: {AOI_center[1]}\n\n"
-            )
-            output_file.write("Version=6\n\n")
-            output_file.write(f"# FeatureEntries {num_features}\n\n")
+    # Sort feature entries if required
+    if sort_option != "None":
+        feature_entries = sort_feature_entries(feature_entries, sort_option)
 
-            for entry in feature_entries:
-                output_file.write(entry + "\n")
-            output_file.write("\n# Point Headers 0\n")
+    # Write features to file
+    write_to_file(SavePath, BuildingGeneratorVer, AOI_center, num_features, feature_entries)
 
-        return feature_entries
+    # Update statistics
+    update_statistics(num_features, feature_types)
 
+    return feature_entries
+
+# Function to get a value based on input parameters and values dictionary
+def get_value(Values_i, Values_f, model_type):
+    if Values_i is not None and Values_f is not None:
+        return np.random.uniform(Values_i, Values_f)
+    elif Values_f is not None:
+        return Values_f
+    else:
+        values_dict = load_values_dict()
+        return values_dict.get(str(model_type), {'Value': 10})['Value']
+
+
+# Function to write feature entries to a file
+def write_to_file(SavePath, BuildingGeneratorVer, AOI_center, num_features, feature_entries):
+    with open(SavePath, "w") as output_file:
+        output_file.write(f"# BMS-BuildingGenerator v{BuildingGeneratorVer} for FalconEditor - Objective Data\n\n")
+        output_file.write(f"# Objective original location in Falcon World (Falcon BMS 4.38 with New Terrain)\n")
+        output_file.write(f"# ObjX: {AOI_center[0]} \n# ObjY: {AOI_center[1]}\n\n")
+        output_file.write("Version=6\n\n")
+        output_file.write(f"# FeatureEntries {num_features}\n\n")
+        output_file.write("\n".join(feature_entries))
+        output_file.write("\n\n# Point Headers 0\n")
+
+# Function to format a feature entry string
+def format_entry(ct_number, y_distance, x_distance, rotation, value, presence, select, feature_name):
+    return (
+        f"FeatureEntry={ct_number} {y_distance:.4f} {x_distance:.4f} 0.0000 {rotation:.4f} "
+        f"{int(value):04d} 0000 -1 {int(presence)}# {select}) {feature_name}")
+
+# Function to load values dictionary from a JSON file
+def load_values_dict():
+    filepath = Path(r"ValuesDic.json")
+    try:
+        with open(filepath, "r") as f:
+            values_dict = json.load(f)
+        if not values_dict:
+            messagebox.showerror("Error", "The values dictionary is empty. The procedure will continue with Value == 10.")
+            return {'default': {'Value': 10}}
+    except Exception:
+        messagebox.showerror("Error", "The values dictionary is not found. The procedure will continue with Value == 10.")
+        return {'default': {'Value': 10}}
+    return values_dict
+
+
+def sort_feature_entries(feature_entries, sort_option):
+    """
+    Sort the feature entries based on the specified option.
+
+    :param feature_entries: List of feature entry strings
+    :param sort_option: String, either "Alphabet" or "Value"
+    :return: Sorted list of feature entry strings
+    """
+
+    def extract_info(entry):
+        parts = entry.split()
+        ct_number = int(
+            parts[0].split("=")[1]
+        )  # Extract the number after 'FeatureEntry='
+        value = int(parts[5])
+        name_part = " ".join(parts[8:])  # Join all parts after the 8th element
+        _, name = name_part.split(")", 1)
+        name = name.strip()
+        return ct_number, value, name
+
+    if sort_option == "Alphabet":
+        sorted_entries = sorted(
+            feature_entries, key=lambda x: extract_info(x)[2].lower()
+        )
+    elif sort_option == "Value":
+        sorted_entries = sorted(
+            feature_entries,
+            key=lambda x: (-extract_info(x)[1], extract_info(x)[2].lower()),
+        )
+    else:
+        return feature_entries  # No sorting if option is invalid
+
+    # Renumber the sorted entries
+    for i, entry in enumerate(sorted_entries):
+        parts = entry.split()
+        name_part = " ".join(parts[8:])
+        _, name = name_part.split(")", 1)
+        new_name = f"{i}) {name.strip()}"
+        parts[8:] = [new_name]
+        sorted_entries[i] = " ".join(parts)
+
+    return sorted_entries
+
+def save_statistics(stats):
+    # Function to save statistics to a gzipped JSON file
+    def default(obj):
+        if isinstance(obj, Counter):
+            return dict(obj)
+        elif isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        else:
+            return obj
+
+    with gzip.open('feature_statistics.json.gz', 'wt') as f:
+        json.dump(stats, f, default=default)
+
+
+def update_statistics(num_features, feature_types):
+    # Function to update statistics with new data
+    stats = load_statistics()
+    stats['total_features'] += int(num_features)
+    stats['total_usage'] += 1
+    stats['feature_types'].update([str(ft) for ft in feature_types])
+    save_statistics(stats)
+
+def load_statistics():
+    # Function to load statistics from a gzipped JSON file
+    try:
+        with gzip.open('feature_statistics.json.gz', 'rt') as f:
+            # Attempt to open and read the gzipped JSON file
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        # If file is not found or is invalid JSON, return default statistics
+        stats = {
+            'total_features': 0,
+            'total_usage': 0,
+            'feature_types': Counter()
+        }
+        # Save the new statistics to create the file
+        save_statistics(stats)
+        return stats
 
 def Auto_Selected(Db_path, Selected_GeoFeature):
     """The function detects possible keys in the GeoFeature and loading a proper Models from the Database
     for better type fitting"""
 
     fillters = []
+
+    if Selected_GeoFeature["BMS"]:
+        # If the BMS key is available, then load the BMS model from the database and ignore other parameters
+        Accurate_filltered_BMSmodels = Load_Db(Db_path, str(Selected_GeoFeature["BMS"]))
+        if not Accurate_filltered_BMSmodels.empty:
+            return Accurate_filltered_BMSmodels
 
     stadium = ["stadium", "ice_rink", "sports_centre", "sports_hall"]
     if (
@@ -960,7 +1013,7 @@ def Auto_Selected(Db_path, Selected_GeoFeature):
         if Selected_GeoFeature["man_made"].lower() == "beacon":
             fillters.extend(["beacon"])
         elif Selected_GeoFeature["man_made"].lower() in fire_poles:
-            fillters.extend(["61", "51"])
+            fillters.extend(["61", "51", "Release Value"])
         elif Selected_GeoFeature["man_made"].lower() == "lighting":
             fillters.extend(["46", "lights", "light"])
 
@@ -971,7 +1024,7 @@ def Auto_Selected(Db_path, Selected_GeoFeature):
         if Selected_GeoFeature["tower"].lower() in watch_tower:
             fillters.extend(["Watchtower"])
         elif Selected_GeoFeature["tower"].lower() in antennas:
-            fillters.extend(["29"])
+            fillters.extend(["Radio Tower", "Telecom Tower"])
         elif Selected_GeoFeature["tower"].lower() == "lighting":
             fillters.extend(["46", "lights", "light"])
         elif Selected_GeoFeature["tower"].lower() == "minaret":
@@ -995,30 +1048,40 @@ def Auto_Selected(Db_path, Selected_GeoFeature):
             fillters.extend(["53"])
         elif Selected_GeoFeature["man_made"].lower() in antennas:
             fillters.extend(["29", "43", "antenna", "33", "28", "satellite"])
+        elif Selected_GeoFeature["man_made"].lower() == "communications_tower":
+            fillters.extend(["Radio Tower", "Telecom Tower"])
 
     if Selected_GeoFeature["power"]:
         Power = [
             "compensator",
-            "converter",
             "plant",
             "substation",
-            "transformer",
             "busbar",
         ]
         electric_tower = ["tower", "terminal", "connection"]
         if Selected_GeoFeature["power"].lower() in Power:
-            fillters.extend(["23", "converter", "32"])
+            fillters.extend(["23", "converter", "32", "Processor"])
         elif Selected_GeoFeature["power"].lower() in electric_tower:
             fillters.extend(["20"])
+        elif Selected_GeoFeature["power"].lower() == "converter":
+            fillters.extend(["converter"])
+        elif Selected_GeoFeature["power"].lower() == "transformer":
+            fillters.extend(["transformer"])
 
     if (
         Selected_GeoFeature["man_made"]
         and Selected_GeoFeature["man_made"].lower()
-        in ["pipeline", "pump", "pumping_station", "works"]
+        in ["pump", "pumping_station", "works"]
         or Selected_GeoFeature["building"]
         and Selected_GeoFeature["building"].lower() == "industrial"
     ):
         fillters.extend(["32", "53", "60", "56", "23", "6"])
+    if (
+        Selected_GeoFeature["man_made"]
+        and Selected_GeoFeature["man_made"].lower() == "pipeline"
+    ):
+        fillters.extend(["piping"])
+
     if (
         Selected_GeoFeature["building"]
         and Selected_GeoFeature["building"].lower()
@@ -1027,7 +1090,7 @@ def Auto_Selected(Db_path, Selected_GeoFeature):
         and Selected_GeoFeature["man_made"].lower()
         in ["gasometer", "storage_tank", "fuel"]
     ):
-        fillters.extend(["48", "10", "fuel"])
+        fillters.extend(["48", "fuel", "gas"])
     if (
         Selected_GeoFeature["building"]
         and Selected_GeoFeature["building"].lower() == "silo"
@@ -1066,7 +1129,7 @@ def Auto_Selected(Db_path, Selected_GeoFeature):
         or Selected_GeoFeature["building"]
         and Selected_GeoFeature["building"].lower() == "bunker"
     ):
-        fillters.extend(["4"])
+        fillters.extend(["4", "bunker"])
 
     barracks = ["barrack", "barracks"]
     if (
@@ -1092,3 +1155,7 @@ def Auto_Selected(Db_path, Selected_GeoFeature):
         return Accurate_filltered_BMSmodels
     else:
         return None
+
+
+
+

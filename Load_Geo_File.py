@@ -61,13 +61,16 @@ def get_height_value(value):
         # Check if feature["height"] is a number
         if isinstance(value, bool):
             none_height = True
-        elif isinstance(value, (int, float)):
+        elif isinstance(value, (int, float)) and value > 0:
             none_height = False
         else:
             # Try to convert feature["height"] to a float
             try:
                 float(value)
-                none_height = False
+                if value < 0:  # If value is negative, ignore
+                    none_height = True
+                else:
+                    none_height = False
             except:
                 none_height = True
     except:
@@ -92,7 +95,9 @@ def projection(coordinations, string):
     return projected_coordinations
 
 
-def Load_Geo_File(json_path, debugger=False, projection_string=None):
+def Load_Geo_File(
+    json_path, debugger=False, projection_string=None, floor_height=2.286
+):
     # meter2feet_google = 3.2808399
     meter2feet_BMS = 3.27998
 
@@ -113,13 +118,21 @@ def Load_Geo_File(json_path, debugger=False, projection_string=None):
     # Extract the important values along with all coordinates
     for index, row in gdf.iterrows():
         name = get_field_value(row, ["name:en", "name:int", "name"])
-        geom_type = row["geometry"].geom_type
+        if row["geometry"] is None:  # Handle error by data
+            print(f"Null geometry in row {index}")
+            continue
+        try:  # Handle error by data
+            geom_type = row["geometry"].geom_type
+        except Exception as e:
+            print(f"Error processing row {index}: {e}")
+            continue
         building, special = get_field_value(row, ["building"], special)
         building_levels, special = get_field_value(row, ["building:levels"], special)
         height, special = get_field_value(row, ["height"], special)
         aeroway, special = get_field_value(row, ["aeroway"], special)
         amenity, special = get_field_value(row, ["amenity"], special)
         barrier, special = get_field_value(row, ["barrier"], special)
+        bms, special = get_field_value(row, ["bms"], special)
         bridge, special = get_field_value(row, ["bridge"], special)
         diplomatic, special = get_field_value(row, ["diplomatic"], special)
         leisure, special = get_field_value(row, ["leisure"], special)
@@ -180,6 +193,7 @@ def Load_Geo_File(json_path, debugger=False, projection_string=None):
                 "aeroway": aeroway,
                 "amenity": amenity,
                 "barrier": barrier,
+                "BMS": bms,
                 "bridge": bridge,
                 "building": building,
                 "diplomatic": diplomatic,
@@ -229,7 +243,7 @@ def Load_Geo_File(json_path, debugger=False, projection_string=None):
 
     sizes_list = []
     heights = []
-    Floor_height_feet = 2.286 * meter2feet_BMS  # 7.5 feet == 2.286 meter
+    Floor_height_feet = floor_height * meter2feet_BMS  # default 7.5 feet == 2.286 meter
 
     # Iterate through the list to calculate center of features
     for feature in feature_list:

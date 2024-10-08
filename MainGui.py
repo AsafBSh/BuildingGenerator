@@ -4,23 +4,24 @@ import tkinter as tk
 import customtkinter as Ctk
 
 # General libraries
-import numpy as np
-from pathlib import Path
-import pandas as pd
 import os
 import json
+import gzip
 import winreg
+import numpy as np
+import pandas as pd
+from pathlib import Path
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import random as rand
 
 # functions from Code
-from MainCode import Load_Db
-import Load_Geo_File as geo
-import ValuesDictionary
-import Restrictions
 import OSMLegend
+import Restrictions
 import InternalConsole
+import ValuesDictionary
+import Load_Geo_File as geo
+from MainCode import Load_Db
 from Database import GenerateDB
 from MainCode import (
     Assign_features_accuratly,
@@ -80,9 +81,8 @@ class MainPage(tk.Tk):
             frame.grid(row=0, column=0, sticky="nsew")
 
         # Set Name and Icon
-        self.title("Building Generator v0.95b")
-        # icon_path = os.path.abspath("icon_128.ico")
-        self.iconbitmap("icon_128.ico")
+        self.title("Building Generator v1.0")
+        self.iconbitmap("Assets/icon_128.ico")
 
         # Select Dash as main front page
         self.show_frame("DashboardPage")
@@ -709,7 +709,7 @@ class DashboardPage(tk.Frame):
             206.0,
             56.0,
             anchor="nw",
-            text="Welcome to the Building Generator \nfor Falcon BMS 4.38+",
+            text="Welcome to Building Generator\nfor Falcon BMS ",
             fill="#000000",
             font=("Inter Bold", 17 * -1, "bold"),
         )
@@ -718,10 +718,10 @@ class DashboardPage(tk.Frame):
             221.0,
             127.0,
             anchor="nw",
-            text="the following software designed to help theater \ncreators to create custom Objectives with accurate"
-            " \nplacement of buildings and features from a selected \nDatabase within BMS arsenal.\n\nTo be able"
-            " to provide valid data please download \nQGIS and QuickOSM. \n\nTheater projection can be done through "
-            "the software\nitself. Explanations will be offered in different section.\n",
+            text="The following software designed to help theater \ncreators to construct custom Objectives, with \naccurate"
+            " placement of buildings and features, from \na selected Database within BMS arsenal.\n\nTo be able"
+            " to provide valid data please download \nQGIS and QuickOSM and other Buildings footprint \nextractors. \n\nTheater projection can be done through "
+            "the software\nitself. Explanations will be offered in the ReadMe.pdf \nfile.\n",
             fill="#000000",
             font=("Inter Medium", 14 * -1),
         )
@@ -749,19 +749,21 @@ class DashboardPage(tk.Frame):
             font=("Inter", 15 * -1),
         )
 
+        # Add counters for generations and features
+        self.generations_counter = tk.StringVar()
+        self.features_counter = tk.StringVar()
+
+        # Load statistics for the pie chart
+        labels, sizes,features_counter,generations_counter = self.load_statistics_for_chart()
+        # Set values for Counters
+        self.generations_counter.set(generations_counter)
+        self.features_counter.set(features_counter)
+
         pie_figure = Figure(figsize=(5, 5), dpi=40)
         chart = pie_figure.add_subplot(111)
 
-        # Pie chart
-        labels = ["Apartment", "Power Plant", "Chemical Plant", "Army Bases"]
-        sizes = [
-            rand.randint(10, 400),
-            rand.randint(10, 400),
-            rand.randint(10, 400),
-            rand.randint(10, 400),
-        ]
-        colors = ["#ff9999", "#66b3ff", "#99ff99", "#ffcc99"]
-        explode = (0.1, 0, 0, 0)
+        colors = ["#ff9999", "#66b3ff", "#99ff99", "#ffcc99", "#c2c2f0"]  # Added a color for "Other"
+        explode = (0.1, 0, 0, 0, 0)  # Added an explode value for "Other"
 
         # draw circle
         chart.pie(
@@ -777,18 +779,41 @@ class DashboardPage(tk.Frame):
         chart.axis("equal")
 
         # Create a canvas and add it to the frame
-        pie_canvas = FigureCanvasTkAgg(pie_figure, self)
-        pie_canvas.draw()
-        pie_canvas.get_tk_widget().place(x=587, y=115)
+        self.pie_canvas = FigureCanvasTkAgg(pie_figure, self)
+        self.pie_canvas.draw()
+        self.pie_canvas.get_tk_widget().place(x=587, y=115)
 
         self.canvas.create_text(
             856.0,
             134,
             anchor="nw",
-            text="Amount of Generations processed: ",
+            text="Amount of \nGenerations \nprocessed: ",
             fill="#000000",
-            font=("Inter", 12 * -1),
+            font=("Inter", 14 * -1),
         )
+        self.generations_label = tk.Label(
+            self,
+            textvariable=self.generations_counter,
+            bg="#FFFFFF",
+            font=("Inter", 30 * -1),
+        )
+        self.generations_label.place(x=950, y=134)
+
+        self.canvas.create_text(
+            856.0,
+            224,
+            anchor="nw",
+            text="Amount of \nFeatures \nprocessed: ",
+            fill="#000000",
+            font=("Inter", 14 * -1),
+        )
+        self.features_label = tk.Label(
+            self,
+            textvariable=self.features_counter,
+            bg="#FFFFFF",
+            font=("Inter", 30 * -1),
+        )
+        self.features_label.place(x=950, y=224)
 
         self.image_image_7 = PhotoImage(
             file=str(self.controller.ASSETS_PATH / "image_7_dash.png")
@@ -958,6 +983,91 @@ class DashboardPage(tk.Frame):
                 break
         return BMS_paths
 
+    def load_statistics_for_chart(self):
+        try:
+            with gzip.open('feature_statistics.json.gz', 'rt') as f:
+                stats = json.load(f)
+            feature_types = stats['feature_types']
+            total_features = stats['total_features']
+            total_usage = stats['total_usage']
+
+            # Convert keys to integers and values to integers
+            feature_types = {int(k): int(v) for k, v in feature_types.items()}
+
+            # Map type numbers to their names
+            type_names = {
+                1: "Carter", 2: "Control Tower", 3: "Barn", 4: "Bunker", 5: "Blush",
+                6: "Factories", 7: "Church", 8: "City Hall", 9: "Dock", 10: "Depot",
+                11: "Runway", 12: "Warehouse", 13: "Helipad", 14: "Fuel Tanks",
+                15: "Nuclear Plant", 16: "Bridges", 17: "Pier", 18: "Power Pole",
+                19: "Shops", 20: "Power Tower", 21: "Apartment", 22: "House",
+                23: "Power Plant", 24: "Taxi Signs", 25: "Nav Beacon", 26: "Radar Site",
+                27: "Craters", 28: "Radars", 29: "R Tower", 30: "Taxiway",
+                31: "Rail Terminal", 32: "Refinery", 33: "SAM", 34: "Shed",
+                35: "Barracks", 36: "Tree", 37: "Water Tower", 38: "Town Hall",
+                39: "Air Terminal", 40: "Shrine", 41: "Park", 42: "Off Block",
+                43: "TV Station", 44: "Hotel", 45: "Hangar", 46: "Lights",
+                47: "VASI", 48: "Storage Tank", 49: "Fence", 50: "Parking Lot",
+                51: "Smoke Stack", 52: "Building", 53: "Cooling Tower", 54: "Cont Dome",
+                55: "Guard House", 56: "Transformer", 57: "Ammo Dump", 58: "Art Site",
+                59: "Office", 60: "Chemical Plant", 61: "Tower", 62: "Hospital",
+                63: "Shops/Blocks", 64: "Static", 65: "Runway Marker", 66: "Stadium",
+                67: "Monument", 68: "Arrestor Cable"
+            }
+
+            # Replace type numbers with type names
+            named_feature_types = {type_names.get(k, f"Type {k}"): v for k, v in feature_types.items()}
+
+            # Sort types by value (count) in descending order
+            sorted_types = sorted(named_feature_types.items(), key=lambda x: x[1], reverse=True)
+
+            # Get the top 4 feature types
+            top_4_types = dict(sorted_types[:4])
+
+            # Calculate the sum of the remaining types
+            other_sum = sum(dict(sorted_types[4:]).values())
+
+            # Add "Other" to the dictionary if there are more than 4 types
+            if other_sum > 0:
+                top_4_types["Other"] = other_sum
+
+            labels = list(top_4_types.keys())
+            sizes = list(top_4_types.values())
+
+            return labels, sizes, total_features, total_usage
+        except (FileNotFoundError, json.JSONDecodeError, ValueError) as e:
+            print(f"Error loading statistics: {e}")
+            # Return default data if file not found, invalid, or conversion fails
+            return ["No Data", "No Data", "No Data", "No Data", "Other"], [1, 1, 1, 1, 1], 0, 0
+
+    def update_pie_chart(self):
+        labels, sizes, total_features, total_usage = self.load_statistics_for_chart()
+
+        # Update counters
+        self.controller.frames["DashboardPage"].generations_counter.set(str(total_usage))
+        self.controller.frames["DashboardPage"].features_counter.set(str(total_features))
+
+        pie_figure = Figure(figsize=(5, 5), dpi=40)
+        chart = pie_figure.add_subplot(111)
+
+        colors = ["#ff9999", "#66b3ff", "#99ff99", "#ffcc99", "#c2c2f0"]  # Added a color for "Other"
+        explode = (0.1, 0, 0, 0, 0)  # Added an explode value for "Other"
+
+        chart.clear()
+        chart.pie(
+            sizes,
+            explode=explode,
+            labels=labels,
+            colors=colors,
+            autopct="%1.1f%%",
+            shadow=True,
+            startangle=140,
+            textprops={"fontsize": 16},
+        )
+        chart.axis("equal")
+
+        self.controller.frames["DashboardPage"].pie_canvas.figure = pie_figure
+        self.controller.frames["DashboardPage"].pie_canvas.draw()
 
 class DatabasePage(tk.Frame):
     def __init__(self, parent, controller):
@@ -1784,11 +1894,12 @@ class GeoDataPage(tk.Frame):
         # label and Entry for amount of structures
         self.label_structures_amount = Ctk.CTkLabel(
             self,
-            text="Amount of Structures:",
+            text="Structures:",
             font=self.button_font,
             bg_color="#F8F9FB",
         )
         self.label_structures_amount.place(x=247, y=486)
+
         self.textbox_structures_amount = Ctk.CTkEntry(
             self,
             width=50,
@@ -1798,13 +1909,13 @@ class GeoDataPage(tk.Frame):
             placeholder_text="0",
             state="disabled",
         )
-        self.textbox_structures_amount.place(x=375, y=489)
+        self.textbox_structures_amount.place(x=321, y=489)
 
         # label and Entry for detailed structures
         self.label_structures_detailed = Ctk.CTkLabel(
             self, text="Detailed:", font=self.button_font, bg_color="#F8F9FB"
         )
-        self.label_structures_detailed.place(x=454, y=486)
+        self.label_structures_detailed.place(x=400, y=486)
         self.textbox_structures_detailed = Ctk.CTkEntry(
             self,
             width=50,
@@ -1814,23 +1925,38 @@ class GeoDataPage(tk.Frame):
             placeholder_text="0",
             state="disabled",
         )
-        self.textbox_structures_detailed.place(x=518, y=489)
+        self.textbox_structures_detailed.place(x=464, y=489)
 
         # label and Entry for structures_center
         self.label_structures_center = Ctk.CTkLabel(
-            self, text="Center:", font=self.button_font, bg_color="#F8F9FB"
+            self, text="Center:", font=self.button_font, bg_color="#EEEEEE"
         )
-        self.label_structures_center.place(x=598, y=486)
+        self.label_structures_center.place(x=544, y=486)
         self.textbox_structures_center = Ctk.CTkEntry(
             self,
-            width=300,
+            width=180,
             height=18,
             border_color="#D5E3F0",
             fg_color="#E7E7E7",
             placeholder_text="XXXX/YYYY",
-            state="disabled",
         )
-        self.textbox_structures_center.place(x=649, y=489)
+        self.textbox_structures_center.place(x=599, y=489)
+        self.textbox_structures_center.configure(state="disabled")
+
+        # label and Entry for structures_center
+        self.label_floor_height = Ctk.CTkLabel(
+            self, text="Floor Height[m]:", font=self.button_font, bg_color="#F8F6F9"
+        )
+        self.label_floor_height.place(x=809, y=486)
+        self.textbox_floor_height = Ctk.CTkEntry(
+            self,
+            width=60,
+            height=18,
+            border_color="#D5E3F0",
+            fg_color="#E7E7E7",
+            placeholder_text="2.286",
+        )
+        self.textbox_floor_height.place(x=905, y=489)
 
         # Load button to apply the main function of loading Geo data
         self.osm_legend_window = Ctk.CTkButton(
@@ -1889,6 +2015,7 @@ class GeoDataPage(tk.Frame):
             "Aeroway",
             "Amenity",
             "Barrier",
+            "BMS",
             "Bridge",
             "Building",
             "Diplomatic",
@@ -1929,7 +2056,7 @@ class GeoDataPage(tk.Frame):
             elif col == "Levels":
                 self.GeoTable.column(col, width=10)
             else:
-                self.GeoTable.column(col, width=38)
+                self.GeoTable.column(col, width=36)
             self.GeoTable.insert(
                 "",
                 "end",
@@ -2024,6 +2151,18 @@ class GeoDataPage(tk.Frame):
         for index, (value, item) in enumerate(data):
             tree.move(item, "", index)
 
+    def is_floor_height_not_valid(self, textbox):
+        content = textbox.get()
+        if not content:
+            return True  # Textbox is empty
+        try:
+            value = float(content)
+            if value == 0.0:
+                return True
+            return False  # Content is a valid float
+        except ValueError:
+            return True  # Content is not a valid float
+
     def CalculateGeo(self):
         """will get Geo-Json file and If the file is valid, The box will be updated with the path string, and the structures list
         will be updated into the table in the page"""
@@ -2039,9 +2178,17 @@ class GeoDataPage(tk.Frame):
             string = self.controller.shared_data["projection_string"].get()
             try:
                 debugger_state = self.controller.shared_data["debugger"]
-                GeoFeatures, CalcData_GeoFeatures, AOI_center = geo.Load_Geo_File(
-                    file_path, debugger_state, string
-                )
+                if self.is_floor_height_not_valid(self.textbox_floor_height):
+                    GeoFeatures, CalcData_GeoFeatures, AOI_center = geo.Load_Geo_File(
+                        file_path, debugger_state, string
+                    )
+                else:
+                    GeoFeatures, CalcData_GeoFeatures, AOI_center = geo.Load_Geo_File(
+                        file_path,
+                        debugger_state,
+                        string,
+                        float(self.textbox_floor_height.get()),
+                    )
                 self.update_geo_data_GUI_fields(
                     GeoFeatures, CalcData_GeoFeatures, AOI_center
                 )
@@ -2122,12 +2269,13 @@ class GeoDataPage(tk.Frame):
         self.textbox_structures_detailed.delete(0, tk.END)
         CalcData_GeoFeatures = pd.DataFrame(CalcData_GeoFeatures)
         self.textbox_structures_detailed.insert(
-            0, str(CalcData_GeoFeatures["Detailed Structure"].value_counts()[1.0])
+            0,
+            str(CalcData_GeoFeatures["Detailed Structure"].value_counts().get(1.0, 0)),
         )
         self.textbox_structures_detailed.configure(state="disabled")
 
         # Convert the numbers to strings and Join the numbers with a '/'
-        str_AOI_center = " / ".join([str(num) for num in AOI_center])
+        str_AOI_center = " / ".join([str(np.round(num, 6)) for num in AOI_center])
         initial_value = self.textbox_structures_center.get()
         len_initial_value = len(initial_value)
         # update the status on the GUI, Entry need to be enabled before updating it's value
@@ -2772,11 +2920,28 @@ class OperationPage(tk.Frame):
             values=["3D", "2D"],
         )
         self.Selection_optionmenu.place(x=684, y=391)
+
+        # label and Entry for Floor deviation Settings
+        self.floor_deviation_label = Ctk.CTkLabel(
+            self, text="Floor Deviation:", font=self.button_font, bg_color="#FDFDFD"
+        )
+        self.floor_deviation_label.place(x=450, y=386)
+
+        self.floor_deviation_entry = Ctk.CTkEntry(
+            self,
+            width=36,
+            height=18,
+            border_color="#D5E3F0",
+            fg_color="#FDFDFD",
+            placeholder_text="0",
+        )
+        self.floor_deviation_entry.place(x=542, y=390)
+
         self.Auto_features_detector = Ctk.CTkCheckBox(
             self,
             checkbox_height=18,
             checkbox_width=18,
-            text="Auto",
+            text="Auto Sel",
             onvalue=True,
             offvalue=False,
             font=self.button_font,
@@ -2887,7 +3052,12 @@ class OperationPage(tk.Frame):
 
         # Create the CTkTextbox widget for Objective number
         self.textbox_Obj = Ctk.CTkEntry(
-            self, width=74, height=18, border_color="#D5E3F0", text_color="#565454"
+            self,
+            width=74,
+            height=18,
+            border_color="#D5E3F0",
+            text_color="#565454",
+            state="disable",
         )
         self.textbox_Obj.place(x=460, y=544)
 
@@ -2902,7 +3072,12 @@ class OperationPage(tk.Frame):
 
         # Create the CTkTextbox widget for CT number
         self.textbox_CT = Ctk.CTkEntry(
-            self, width=74, height=18, border_color="#D5E3F0", text_color="#565454"
+            self,
+            width=74,
+            height=18,
+            border_color="#D5E3F0",
+            text_color="#565454",
+            state="disable",
         )
         self.textbox_CT.place(x=460, y=518)
 
@@ -2972,6 +3147,22 @@ class OperationPage(tk.Frame):
             1033.0, 476.0, 1095.0, 497.0, fill="#D9D9D9", outline=""
         )
 
+        # Create the segemented_button widget for Method Selection
+        self.sorting_saving = Ctk.CTkSegmentedButton(
+            self,
+            values=["None", "Alphabet", "Value"],
+            font=("Arial", 10),
+            fg_color="#D5E3F0",
+            unselected_color="#D5E3F0",
+            selected_color="#8DBBE7",
+            height=18,
+            width=135,
+            text_color="#565454",
+            dynamic_resizing=False,
+        )
+        self.sorting_saving.place(x=656, y=490)
+        self.sorting_saving.set("None")
+
         self.canvas.create_text(
             557.0,
             521.0,
@@ -3000,6 +3191,7 @@ class OperationPage(tk.Frame):
             text_color="#565454",
             # command=self.Browse_saving_path,
             fg_color="#D5E3F0",
+            state="disabled",
         )
         self.Get_More_button.place(x=499, y=490)
 
@@ -3010,6 +3202,7 @@ class OperationPage(tk.Frame):
             text="Browse",
             # command=self.Browse_saving_path,
             fg_color="#8DBBE7",
+            state="disabled",
         )
         self.Get_Objective_button.place(x=400, y=518)
         self.Get_CT_button = Ctk.CTkButton(
@@ -3019,6 +3212,7 @@ class OperationPage(tk.Frame):
             text="Browse",
             # command=self.Browse_saving_path,
             fg_color="#8DBBE7",
+            state="disabled",
         )
         self.Get_CT_button.place(x=400, y=544)
 
@@ -3507,7 +3701,7 @@ class OperationPage(tk.Frame):
     def Create_Feature_List_For_BMS(self):
         # Check all requests before continue to the algorithm
         ## Set Version of Software:
-        BuildingGeneratorVer = "0.91b"
+        BuildingGeneratorVer = "1.0"
 
         generating_method = self.segemented_button.get()
         saving_method = self.segemented_button_Saving.get()
@@ -3547,6 +3741,25 @@ class OperationPage(tk.Frame):
                         )
                     else:
                         Presence_i = None
+
+                    # Get Floor height and floor deviation from Geodata page for height deviation functionality
+                    if self.controller.frames["GeoDataPage"].is_floor_height_not_valid(
+                        self.floor_deviation_entry
+                    ):
+                        floor_deviation = 0
+                    else:
+                        floor_deviation = float(self.floor_deviation_entry.get())
+
+                    if self.controller.frames["GeoDataPage"].is_floor_height_not_valid(
+                        self.controller.frames["GeoDataPage"].textbox_floor_height
+                    ):
+                        floor_height = 2.286
+                    else:
+                        floor_height = float(
+                            self.controller.frames[
+                                "GeoDataPage"
+                            ].textbox_floor_height.get()
+                        )
 
                     fillter = self.Fillter_optionmenu.get()
                     selection = self.Selection_optionmenu.get()
@@ -3588,7 +3801,13 @@ class OperationPage(tk.Frame):
                             Values_i,
                             self.Auto_features_detector.get(),
                             BuildingGeneratorVer,
+                            self.sorting_saving.get(),
+                            floor_height,
+                            floor_deviation,
                         )
+
+                        # Update other dashboard elements as needed
+                        self.controller.frames["DashboardPage"].update_pie_chart()
 
                         # Without issues, success message will apear
                         messagebox.showinfo(
@@ -3598,6 +3817,12 @@ class OperationPage(tk.Frame):
                         )
                         # Will generate graph of the BMSfeatures/GeoFeatures based on the segmented button in the GUI
                         self.auto_graph_generating()
+
+                    elif saving_method == "BMS":
+                        return messagebox.showinfo(
+                            "Operation Denied",
+                            "Extraction directly to BMS is currently not implemented",
+                        )
 
                 else:
                     # if Database_Availability is 0, place error (no valid db)
@@ -3675,7 +3900,7 @@ class OperationPage(tk.Frame):
                         self.Editor_Extraction_name.get() + ".txt",
                     )
 
-                    Save_random_features(
+                    self.BMS_features_map = Save_random_features(
                         saving_method,
                         num_features,
                         selected_data,
@@ -3687,9 +3912,13 @@ class OperationPage(tk.Frame):
                         Values,
                         Presence_i,
                         Values_i,
+                        self.sorting_saving.get(),
                         CT_Num=None,
                         Obj_Num=None,
                     )
+
+                    # Update other dashboard elements as needed
+                    self.controller.frames["DashboardPage"].update_pie_chart()
 
                     messagebox.showinfo(
                         "Operation succeeded",
@@ -3697,8 +3926,15 @@ class OperationPage(tk.Frame):
                         f"generated",
                     )
 
-            # elif saving_method == "BMS":
-            #     k = 1
+                    # Will generate graph of the BMSfeatures/GeoFeatures based on the segmented button in the GUI
+                    self.auto_graph_generating()
+
+
+            elif saving_method == "BMS":
+                return messagebox.showinfo(
+                    "Operation Denied",
+                    "Extraction directly to BMS is currently not implemented",
+                )
 
 
 if __name__ == "__main__":
