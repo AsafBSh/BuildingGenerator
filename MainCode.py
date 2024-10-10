@@ -624,7 +624,7 @@ def Assign_features_randomly(num_features, radius, DB_path, DB_restrictions):
 
     np.random.seed(int(time.time()))
     # Randomly select features
-    selected_indices = np.random.choice(len(AllBMSModels), num_features, replace=False)
+    selected_indices = np.random.choice(len(AllBMSModels), num_features, replace=True)
     selected_data = AllBMSModels.iloc[selected_indices]
 
     # Generate random coordinates within the specified radius
@@ -883,9 +883,10 @@ def sort_feature_entries(feature_entries, sort_option):
     for i, entry in enumerate(sorted_entries):
         parts = entry.split()
         name_part = " ".join(parts[8:])
-        _, name = name_part.split(")", 1)
+        presence_idx, name = name_part.split(")", 1)
+        presence, idx = name_part.split(" ", 1)
         new_name = f"{i}) {name.strip()}"
-        parts[8:] = [new_name]
+        parts[8:] = [presence, new_name]
         sorted_entries[i] = " ".join(parts)
 
     return sorted_entries
@@ -895,43 +896,57 @@ def save_statistics(stats):
     def default(obj):
         if isinstance(obj, Counter):
             return dict(obj)
-        elif isinstance(obj, np.integer):
+        elif isinstance(obj, (np.integer, np.int64)):
             return int(obj)
-        elif isinstance(obj, np.floating):
+        elif isinstance(obj, (np.floating, float)):
             return float(obj)
         elif isinstance(obj, np.ndarray):
             return obj.tolist()
         else:
             return obj
 
+    # Convert all keys to strings and ensure all values in feature_types are integers
+    stats = {str(k): (v if k != 'feature_types' else {str(fk): int(fv) for fk, fv in v.items()}) for k, v in
+             stats.items()}
+
     with gzip.open('feature_statistics.json.gz', 'wt') as f:
         json.dump(stats, f, default=default)
 
 
 def update_statistics(num_features, feature_types):
-    # Function to update statistics with new data
     stats = load_statistics()
     stats['total_features'] += int(num_features)
     stats['total_usage'] += 1
-    stats['feature_types'].update([str(ft) for ft in feature_types])
+
+    # Ensure feature_types is a Counter with integer values
+    if not isinstance(stats['feature_types'], Counter):
+        stats['feature_types'] = Counter({str(k): int(v) for k, v in stats['feature_types'].items()})
+
+    # Update feature types, converting all keys to strings and values to integers
+    feature_type_counts = Counter({str(ft): 1 for ft in feature_types})
+    stats['feature_types'].update(feature_type_counts)
+
+    # Ensure all values in feature_types are integers
+    stats['feature_types'] = Counter({k: int(v) for k, v in stats['feature_types'].items()})
+
     save_statistics(stats)
 
 def load_statistics():
     # Function to load statistics from a gzipped JSON file
     try:
         with gzip.open('feature_statistics.json.gz', 'rt') as f:
-            # Attempt to open and read the gzipped JSON file
-            return json.load(f)
+            stats = json.load(f)
+
+        # Ensure feature_types is a Counter with integer values
+        stats['feature_types'] = Counter({str(k): int(v) for k, v in stats['feature_types'].items()})
+
+        return stats
     except (FileNotFoundError, json.JSONDecodeError):
-        # If file is not found or is invalid JSON, return default statistics
-        stats = {
+        return {
             'total_features': 0,
             'total_usage': 0,
             'feature_types': Counter()
         }
-        # Save the new statistics to create the file
-        save_statistics(stats)
-        return stats
 
 def Auto_Selected(Db_path, Selected_GeoFeature):
     """The function detects possible keys in the GeoFeature and loading a proper Models from the Database
@@ -978,6 +993,8 @@ def Auto_Selected(Db_path, Selected_GeoFeature):
             fillters.extend(
                 ["church", "presbytery", "cathedral", "chapel", "monastery"]
             )
+        elif Selected_GeoFeature["building"].lower() == "warehouse":
+            fillters.extend(["12", "warehouse"])
         elif Selected_GeoFeature["building"].lower() == "synagogue":
             fillters.extend(["synagogue"])
         elif Selected_GeoFeature["building"].lower() == "shrine":

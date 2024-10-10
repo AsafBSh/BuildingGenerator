@@ -94,6 +94,11 @@ class OSMLegend(tk.Toplevel):
         )
 
         window.tree.insert(building, "end", values=("silo", "silo"))
+        window.tree.insert(
+            building,
+            "end",
+            values=("warehouse", "warehouse", "Warehouse"),
+        )
         window.tree.insert(building, "end", values=("water_tower", "", "Water Tower"))
 
         # Add man_made items
