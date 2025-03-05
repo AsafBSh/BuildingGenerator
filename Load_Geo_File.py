@@ -16,6 +16,7 @@ def get_field_value(row, field_names, special=None):
             value = row[field]
             # If the value is a string, return it
             if isinstance(value, str):
+                value = value.lower()
                 # Check if special is a None, if not, check if the value is not in the list to determine if it is special
                 if special is not None:
                     if special or value not in [
@@ -31,9 +32,9 @@ def get_field_value(row, field_names, special=None):
                         return value, False
                 return value
             elif value is not None and not m.isnan(value):
-                # Same check
+                # Same check for non-string values (no lowercase conversion)
                 if special is not None:
-                    if special or value not in [
+                    if special or str(value).lower() not in [
                         " ",
                         "roof",
                         "no",
@@ -193,7 +194,7 @@ def Load_Geo_File(
                 "aeroway": aeroway,
                 "amenity": amenity,
                 "barrier": barrier,
-                "BMS": bms,
+                "bms": bms,
                 "bridge": bridge,
                 "building": building,
                 "diplomatic": diplomatic,

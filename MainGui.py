@@ -13,7 +13,6 @@ import pandas as pd
 from pathlib import Path
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-import random as rand
 
 # functions from Code
 import OSMLegend
@@ -81,7 +80,7 @@ class MainPage(tk.Tk):
             frame.grid(row=0, column=0, sticky="nsew")
 
         # Set Name and Icon
-        self.title("Building Generator v1.0")
+        self.title("Building Generator v1.1")
         self.iconbitmap("Assets/icon_128.ico")
 
         # Select Dash as main front page
@@ -754,7 +753,9 @@ class DashboardPage(tk.Frame):
         self.features_counter = tk.StringVar()
 
         # Load statistics for the pie chart
-        labels, sizes,features_counter,generations_counter = self.load_statistics_for_chart()
+        labels, sizes, features_counter, generations_counter = (
+            self.load_statistics_for_chart()
+        )
         # Set values for Counters
         self.generations_counter.set(generations_counter)
         self.features_counter.set(features_counter)
@@ -762,7 +763,13 @@ class DashboardPage(tk.Frame):
         pie_figure = Figure(figsize=(5, 5), dpi=40)
         chart = pie_figure.add_subplot(111)
 
-        colors = ["#ff9999", "#66b3ff", "#99ff99", "#ffcc99", "#c2c2f0"]  # Added a color for "Other"
+        colors = [
+            "#ff9999",
+            "#66b3ff",
+            "#99ff99",
+            "#ffcc99",
+            "#c2c2f0",
+        ]  # Added a color for "Other"
         explode = (0.1, 0, 0, 0, 0)  # Added an explode value for "Other"
 
         # draw circle
@@ -985,41 +992,96 @@ class DashboardPage(tk.Frame):
 
     def load_statistics_for_chart(self):
         try:
-            with gzip.open('feature_statistics.json.gz', 'rt') as f:
+            with gzip.open("feature_statistics.json.gz", "rt") as f:
                 stats = json.load(f)
-            feature_types = stats['feature_types']
-            total_features = stats['total_features']
-            total_usage = stats['total_usage']
+            feature_types = stats["feature_types"]
+            total_features = stats["total_features"]
+            total_usage = stats["total_usage"]
 
             # Convert keys to integers and values to integers
             feature_types = {int(k): int(v) for k, v in feature_types.items()}
 
             # Map type numbers to their names
             type_names = {
-                1: "Carter", 2: "Control Tower", 3: "Barn", 4: "Bunker", 5: "Blush",
-                6: "Factories", 7: "Church", 8: "City Hall", 9: "Dock", 10: "Depot",
-                11: "Runway", 12: "Warehouse", 13: "Helipad", 14: "Fuel Tanks",
-                15: "Nuclear Plant", 16: "Bridges", 17: "Pier", 18: "Power Pole",
-                19: "Shops", 20: "Power Tower", 21: "Apartment", 22: "House",
-                23: "Power Plant", 24: "Taxi Signs", 25: "Nav Beacon", 26: "Radar Site",
-                27: "Craters", 28: "Radars", 29: "R Tower", 30: "Taxiway",
-                31: "Rail Terminal", 32: "Refinery", 33: "SAM", 34: "Shed",
-                35: "Barracks", 36: "Tree", 37: "Water Tower", 38: "Town Hall",
-                39: "Air Terminal", 40: "Shrine", 41: "Park", 42: "Off Block",
-                43: "TV Station", 44: "Hotel", 45: "Hangar", 46: "Lights",
-                47: "VASI", 48: "Storage Tank", 49: "Fence", 50: "Parking Lot",
-                51: "Smoke Stack", 52: "Building", 53: "Cooling Tower", 54: "Cont Dome",
-                55: "Guard House", 56: "Transformer", 57: "Ammo Dump", 58: "Art Site",
-                59: "Office", 60: "Chemical Plant", 61: "Tower", 62: "Hospital",
-                63: "Shops/Blocks", 64: "Static", 65: "Runway Marker", 66: "Stadium",
-                67: "Monument", 68: "Arrestor Cable"
+                1: "Carter",
+                2: "Control Tower",
+                3: "Barn",
+                4: "Bunker",
+                5: "Blush",
+                6: "Factories",
+                7: "Church",
+                8: "City Hall",
+                9: "Dock",
+                10: "Depot",
+                11: "Runway",
+                12: "Warehouse",
+                13: "Helipad",
+                14: "Fuel Tanks",
+                15: "Nuclear Plant",
+                16: "Bridges",
+                17: "Pier",
+                18: "Power Pole",
+                19: "Shops",
+                20: "Power Tower",
+                21: "Apartment",
+                22: "House",
+                23: "Power Plant",
+                24: "Taxi Signs",
+                25: "Nav Beacon",
+                26: "Radar Site",
+                27: "Craters",
+                28: "Radars",
+                29: "R Tower",
+                30: "Taxiway",
+                31: "Rail Terminal",
+                32: "Refinery",
+                33: "SAM",
+                34: "Shed",
+                35: "Barracks",
+                36: "Tree",
+                37: "Water Tower",
+                38: "Town Hall",
+                39: "Air Terminal",
+                40: "Shrine",
+                41: "Park",
+                42: "Off Block",
+                43: "TV Station",
+                44: "Hotel",
+                45: "Hangar",
+                46: "Lights",
+                47: "VASI",
+                48: "Storage Tank",
+                49: "Fence",
+                50: "Parking Lot",
+                51: "Smoke Stack",
+                52: "Building",
+                53: "Cooling Tower",
+                54: "Cont Dome",
+                55: "Guard House",
+                56: "Transformer",
+                57: "Ammo Dump",
+                58: "Art Site",
+                59: "Office",
+                60: "Chemical Plant",
+                61: "Tower",
+                62: "Hospital",
+                63: "Shops/Blocks",
+                64: "Static",
+                65: "Runway Marker",
+                66: "Stadium",
+                67: "Monument",
+                68: "Arrestor Cable",
             }
 
             # Replace type numbers with type names
-            named_feature_types = {type_names.get(k, f"Type {k}"): v for k, v in feature_types.items()}
+            named_feature_types = {
+                type_names.get(k, f"Type {k}"): v for k, v in feature_types.items()
+            }
 
             # Sort types by value (count) in descending order
-            sorted_types = sorted(named_feature_types.items(), key=lambda x: x[1], reverse=True)
+            sorted_types = sorted(
+                named_feature_types.items(), key=lambda x: x[1], reverse=True
+            )
 
             # Get the top 4 feature types
             top_4_types = dict(sorted_types[:4])
@@ -1038,19 +1100,34 @@ class DashboardPage(tk.Frame):
         except (FileNotFoundError, json.JSONDecodeError, ValueError) as e:
             print(f"Error loading statistics: {e}")
             # Return default data if file not found, invalid, or conversion fails
-            return ["No Data", "No Data", "No Data", "No Data", "Other"], [1, 1, 1, 1, 1], 0, 0
+            return (
+                ["No Data", "No Data", "No Data", "No Data", "Other"],
+                [1, 1, 1, 1, 1],
+                0,
+                0,
+            )
 
     def update_pie_chart(self):
         labels, sizes, total_features, total_usage = self.load_statistics_for_chart()
 
         # Update counters
-        self.controller.frames["DashboardPage"].generations_counter.set(str(total_usage))
-        self.controller.frames["DashboardPage"].features_counter.set(str(total_features))
+        self.controller.frames["DashboardPage"].generations_counter.set(
+            str(total_usage)
+        )
+        self.controller.frames["DashboardPage"].features_counter.set(
+            str(total_features)
+        )
 
         pie_figure = Figure(figsize=(5, 5), dpi=40)
         chart = pie_figure.add_subplot(111)
 
-        colors = ["#ff9999", "#66b3ff", "#99ff99", "#ffcc99", "#c2c2f0"]  # Added a color for "Other"
+        colors = [
+            "#ff9999",
+            "#66b3ff",
+            "#99ff99",
+            "#ffcc99",
+            "#c2c2f0",
+        ]  # Added a color for "Other"
         explode = (0.1, 0, 0, 0, 0)  # Added an explode value for "Other"
 
         chart.clear()
@@ -1068,6 +1145,7 @@ class DashboardPage(tk.Frame):
 
         self.controller.frames["DashboardPage"].pie_canvas.figure = pie_figure
         self.controller.frames["DashboardPage"].pie_canvas.draw()
+
 
 class DatabasePage(tk.Frame):
     def __init__(self, parent, controller):
@@ -1669,6 +1747,9 @@ class DatabasePage(tk.Frame):
 
         # Update existing database table
         self.Udpate_existedDB_Tables()
+        return messagebox.showinfo(
+            "Success", "Database has been generated successfully"
+        )
 
     def NewDBupdate(self):
         """The function should be called after successful run of generating DB
@@ -3928,7 +4009,6 @@ class OperationPage(tk.Frame):
 
                     # Will generate graph of the BMSfeatures/GeoFeatures based on the segmented button in the GUI
                     self.auto_graph_generating()
-
 
             elif saving_method == "BMS":
                 return messagebox.showinfo(

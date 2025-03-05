@@ -177,7 +177,7 @@ def GenerateDB(class_table_xml_path, save_path, debugger=False, Korea_CT_XML_pat
 
     # Remove corresponding rows from the data array
     data = np.delete(data, empty_feature_indices, axis=0)
-    # do the same sanme for models dimenstions
+    # do the same sane for models dimenstions
     model_dimensions = np.delete(model_dimensions, empty_feature_indices, axis=0)
 
     # Combine data and model_dimensions into a single array

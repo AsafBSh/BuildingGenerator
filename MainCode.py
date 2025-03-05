@@ -10,8 +10,9 @@ from tkinter import messagebox
 from pathlib import Path
 import matplotlib.pyplot as MatPlt
 from scipy.spatial.distance import cdist
-from collections import defaultdict, Counter
+from collections import Counter
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+
 
 # Load the data from the database
 def Load_Db(path, feature_name="All"):
@@ -614,13 +615,11 @@ def Rotation_Definer(Angle, BMS_Length_idx):
 
 
 def Assign_features_randomly(num_features, radius, DB_path, DB_restrictions):
-
     # Load the database file containing the features data (mydatabase.db)
     AllBMSModels = Load_Db(DB_path, DB_restrictions)  # Options ModelNum, Name, Type
 
     if len(AllBMSModels) == 0:
         return TypeError
-
 
     np.random.seed(int(time.time()))
     # Randomly select features
@@ -652,7 +651,6 @@ def Save_random_features(
     CT_Num=None,
     Obj_Num=None,
 ):
-
     feature_entries = []
     feature_types = []
 
@@ -673,10 +671,22 @@ def Save_random_features(
 
         # Generate random value and presence based on input parameters
         value = get_value(Values_i, Values_f, feature_type)
-        presence = np.random.uniform(Presence_i, Presence_f) if Presence_i is not None else Presence_f
+        presence = (
+            np.random.uniform(Presence_i, Presence_f)
+            if Presence_i is not None
+            else Presence_f
+        )
 
-        formatted_entry = format_entry(ct_number, y_distance, x_distance, rotation, value, presence, i,
-                                       feature_name)
+        formatted_entry = format_entry(
+            ct_number,
+            y_distance,
+            x_distance,
+            rotation,
+            value,
+            presence,
+            i,
+            feature_name,
+        )
         feature_entries.append(formatted_entry)
         feature_types.append(feature_type)
 
@@ -685,12 +695,15 @@ def Save_random_features(
             feature_entries = sort_feature_entries(feature_entries, sort_option)
 
     # Write the formatted data to a file in the Falcon BMS format
-    write_to_file(output_file_path, BuildingGeneratorVer, [0,0], num_features, feature_entries)
+    write_to_file(
+        output_file_path, BuildingGeneratorVer, [0, 0], num_features, feature_entries
+    )
 
     # Update statistics with the new features
     update_statistics(num_features, feature_types)
 
     return feature_entries
+
 
 def Assign_features_accuratly(
     num_features,
@@ -764,45 +777,76 @@ def Save_accurate_features(
     # Iterate through each selected geographic feature
     for select in range(len(Selected_GeoFeatures)):
         # Auto-select BMS models if enabled
-        Auto_BMSModels = Auto_Selected(Db_path, Selected_GeoFeatures.iloc[select]) if auto_features_detection else None
+        Auto_BMSModels = (
+            Auto_Selected(Db_path, Selected_GeoFeatures.iloc[select])
+            if auto_features_detection
+            else None
+        )
         Models = Auto_BMSModels if Auto_BMSModels is not None else AllBMSModels
 
         # Use Decision_Algo to find the best model
         corrent_model_idx, closest_distance = Decision_Algo(
-            Selected_GeoFeatures, Selected_CalcData_GeoFeatures, select,
-            Models, floor_height, selection_option, num_floors
+            Selected_GeoFeatures,
+            Selected_CalcData_GeoFeatures,
+            select,
+            Models,
+            floor_height,
+            selection_option,
+            num_floors,
         )
 
         # Extract model information
         model = Models.iloc[corrent_model_idx]
-        ct_number, feature_name = model['CTNumber'], model['FeatureName']
-        rotation = Rotation_Definer(Selected_GeoFeatures.iloc[select]['rotation'], model['LengthIdx'])
+        ct_number, feature_name = model["CTNumber"], model["FeatureName"]
+        rotation = Rotation_Definer(
+            Selected_GeoFeatures.iloc[select]["rotation"], model["LengthIdx"]
+        )
 
         # Calculate offset and distances
-        r_offset = np.sqrt(model['LengthOff']**2 + model['WidthOff']**2)
-        x_distance = Selected_CalcData_GeoFeatures[select, 5] - r_offset * np.sin(rotation)
-        y_distance = Selected_CalcData_GeoFeatures[select, 6] - r_offset * np.cos(rotation)
+        r_offset = np.sqrt(model["LengthOff"] ** 2 + model["WidthOff"] ** 2)
+        x_distance = Selected_CalcData_GeoFeatures[select, 5] - r_offset * np.sin(
+            np.radians(rotation)
+        )
+        y_distance = Selected_CalcData_GeoFeatures[select, 6] - r_offset * np.cos(
+            np.radians(rotation)
+        )
 
         # Get value and presence
-        value = get_value(Values_i, Values_f, model['Type'])
-        presence = np.random.uniform(Presence_i, Presence_f) if Presence_i is not None else Presence_f
+        value = get_value(Values_i, Values_f, model["Type"])
+        presence = (
+            np.random.uniform(Presence_i, Presence_f)
+            if Presence_i is not None
+            else Presence_f
+        )
 
         # Format and append the entry
-        formatted_entry = format_entry(ct_number, y_distance, x_distance, rotation, value, presence, select, feature_name)
+        formatted_entry = format_entry(
+            ct_number,
+            y_distance,
+            x_distance,
+            rotation,
+            value,
+            presence,
+            select,
+            feature_name,
+        )
         feature_entries.append(formatted_entry)
-        feature_types.append(model['Type'])
+        feature_types.append(model["Type"])
 
     # Sort feature entries if required
     if sort_option != "None":
         feature_entries = sort_feature_entries(feature_entries, sort_option)
 
     # Write features to file
-    write_to_file(SavePath, BuildingGeneratorVer, AOI_center, num_features, feature_entries)
+    write_to_file(
+        SavePath, BuildingGeneratorVer, AOI_center, num_features, feature_entries
+    )
 
     # Update statistics
     update_statistics(num_features, feature_types)
 
     return feature_entries
+
 
 # Function to get a value based on input parameters and values dictionary
 def get_value(Values_i, Values_f, model_type):
@@ -812,25 +856,36 @@ def get_value(Values_i, Values_f, model_type):
         return Values_f
     else:
         values_dict = load_values_dict()
-        return values_dict.get(str(model_type), {'Value': 10})['Value']
+        return values_dict.get(str(model_type), {"Value": 10})["Value"]
 
 
 # Function to write feature entries to a file
-def write_to_file(SavePath, BuildingGeneratorVer, AOI_center, num_features, feature_entries):
+def write_to_file(
+    SavePath, BuildingGeneratorVer, AOI_center, num_features, feature_entries
+):
     with open(SavePath, "w") as output_file:
-        output_file.write(f"# BMS-BuildingGenerator v{BuildingGeneratorVer} for FalconEditor - Objective Data\n\n")
-        output_file.write(f"# Objective original location in Falcon World (Falcon BMS 4.38 with New Terrain)\n")
+        output_file.write(
+            f"# BMS-BuildingGenerator v{BuildingGeneratorVer} for FalconEditor - Objective Data\n\n"
+        )
+        output_file.write(
+            "# Objective original location in Falcon World (Falcon BMS 4.38 with New Terrain)\n"
+        )
         output_file.write(f"# ObjX: {AOI_center[0]} \n# ObjY: {AOI_center[1]}\n\n")
         output_file.write("Version=6\n\n")
         output_file.write(f"# FeatureEntries {num_features}\n\n")
         output_file.write("\n".join(feature_entries))
         output_file.write("\n\n# Point Headers 0\n")
 
+
 # Function to format a feature entry string
-def format_entry(ct_number, y_distance, x_distance, rotation, value, presence, select, feature_name):
+def format_entry(
+    ct_number, y_distance, x_distance, rotation, value, presence, select, feature_name
+):
     return (
         f"FeatureEntry={ct_number} {y_distance:.4f} {x_distance:.4f} 0.0000 {rotation:.4f} "
-        f"{int(value):04d} 0000 -1 {int(presence)}# {select}) {feature_name}")
+        f"{int(value):04d} 0000 -1 {int(presence)}# {select}) {feature_name}"
+    )
+
 
 # Function to load values dictionary from a JSON file
 def load_values_dict():
@@ -839,11 +894,17 @@ def load_values_dict():
         with open(filepath, "r") as f:
             values_dict = json.load(f)
         if not values_dict:
-            messagebox.showerror("Error", "The values dictionary is empty. The procedure will continue with Value == 10.")
-            return {'default': {'Value': 10}}
+            messagebox.showerror(
+                "Error",
+                "The values dictionary is empty. The procedure will continue with Value == 10.",
+            )
+            return {"default": {"Value": 10}}
     except Exception:
-        messagebox.showerror("Error", "The values dictionary is not found. The procedure will continue with Value == 10.")
-        return {'default': {'Value': 10}}
+        messagebox.showerror(
+            "Error",
+            "The values dictionary is not found. The procedure will continue with Value == 10.",
+        )
+        return {"default": {"Value": 10}}
     return values_dict
 
 
@@ -891,6 +952,7 @@ def sort_feature_entries(feature_entries, sort_option):
 
     return sorted_entries
 
+
 def save_statistics(stats):
     # Function to save statistics to a gzipped JSON file
     def default(obj):
@@ -906,273 +968,227 @@ def save_statistics(stats):
             return obj
 
     # Convert all keys to strings and ensure all values in feature_types are integers
-    stats = {str(k): (v if k != 'feature_types' else {str(fk): int(fv) for fk, fv in v.items()}) for k, v in
-             stats.items()}
+    stats = {
+        str(k): (
+            v if k != "feature_types" else {str(fk): int(fv) for fk, fv in v.items()}
+        )
+        for k, v in stats.items()
+    }
 
-    with gzip.open('feature_statistics.json.gz', 'wt') as f:
+    with gzip.open("feature_statistics.json.gz", "wt") as f:
         json.dump(stats, f, default=default)
 
 
 def update_statistics(num_features, feature_types):
     stats = load_statistics()
-    stats['total_features'] += int(num_features)
-    stats['total_usage'] += 1
+    stats["total_features"] += int(num_features)
+    stats["total_usage"] += 1
 
     # Ensure feature_types is a Counter with integer values
-    if not isinstance(stats['feature_types'], Counter):
-        stats['feature_types'] = Counter({str(k): int(v) for k, v in stats['feature_types'].items()})
+    if not isinstance(stats["feature_types"], Counter):
+        stats["feature_types"] = Counter(
+            {str(k): int(v) for k, v in stats["feature_types"].items()}
+        )
 
     # Update feature types, converting all keys to strings and values to integers
     feature_type_counts = Counter({str(ft): 1 for ft in feature_types})
-    stats['feature_types'].update(feature_type_counts)
+    stats["feature_types"].update(feature_type_counts)
 
     # Ensure all values in feature_types are integers
-    stats['feature_types'] = Counter({k: int(v) for k, v in stats['feature_types'].items()})
+    stats["feature_types"] = Counter(
+        {k: int(v) for k, v in stats["feature_types"].items()}
+    )
 
     save_statistics(stats)
+
 
 def load_statistics():
     # Function to load statistics from a gzipped JSON file
     try:
-        with gzip.open('feature_statistics.json.gz', 'rt') as f:
+        with gzip.open("feature_statistics.json.gz", "rt") as f:
             stats = json.load(f)
 
         # Ensure feature_types is a Counter with integer values
-        stats['feature_types'] = Counter({str(k): int(v) for k, v in stats['feature_types'].items()})
+        stats["feature_types"] = Counter(
+            {str(k): int(v) for k, v in stats["feature_types"].items()}
+        )
 
         return stats
     except (FileNotFoundError, json.JSONDecodeError):
-        return {
-            'total_features': 0,
-            'total_usage': 0,
-            'feature_types': Counter()
-        }
+        return {"total_features": 0, "total_usage": 0, "feature_types": Counter()}
+
 
 def Auto_Selected(Db_path, Selected_GeoFeature):
-    """The function detects possible keys in the GeoFeature and loading a proper Models from the Database
-    for better type fitting"""
-
+    """The function detects possible keys in the GeoFeature and loading a proper Models from the Database for better type fitting"""
     fillters = []
 
-    if Selected_GeoFeature["BMS"]:
-        # If the BMS key is available, then load the BMS model from the database and ignore other parameters
-        Accurate_filltered_BMSmodels = Load_Db(Db_path, str(Selected_GeoFeature["BMS"]))
+    if Selected_GeoFeature["bms"]:
+        Accurate_filltered_BMSmodels = Load_Db(Db_path, str(Selected_GeoFeature["bms"]))
         if not Accurate_filltered_BMSmodels.empty:
             return Accurate_filltered_BMSmodels
 
     stadium = ["stadium", "ice_rink", "sports_centre", "sports_hall"]
-    if (
-        Selected_GeoFeature["leisure"]
-        and Selected_GeoFeature["leisure"].lower() in stadium
-        or Selected_GeoFeature["sport"]
-    ):
+    if (Selected_GeoFeature["leisure"] and any(s in split_string(Selected_GeoFeature["leisure"]) for s in stadium)) or Selected_GeoFeature["sport"]:
         fillters.extend(["66", "sport"])
 
     if Selected_GeoFeature["religion"]:
-        if Selected_GeoFeature["religion"].lower == "muslim":
+        religion_terms = split_string(Selected_GeoFeature["religion"])
+        if "muslim" in religion_terms:
             fillters.extend(["minaret", "mosque"])
-        elif Selected_GeoFeature["religion"].lower == "jewish":
+        elif "jewish" in religion_terms:
             fillters.extend(["synagogue"])
-        elif Selected_GeoFeature["religion"].lower == "christian":
+        elif "christian" in religion_terms:
             fillters.extend(["church", "presbytery", "cathedral", "chapel"])
-        elif Selected_GeoFeature["religion"].lower in ["buddhist", "shinto"]:
+        elif "buddhist" in religion_terms or "shinto" in religion_terms:
             fillters.extend(["temple", "shrine", "monastery"])
         else:
             fillters.extend(["7", "40"])
 
     if Selected_GeoFeature["building"]:
-        if Selected_GeoFeature["building"].lower() == "hangar":
-            fillters.extend(["HAS", "hangar", "FT Shelter"])
-        elif Selected_GeoFeature["building"].lower() in ["mosque", "minaret", "muslim"]:
+        building_terms = split_string(Selected_GeoFeature["building"])
+        if "hangar" in building_terms:
+            fillters.extend(["has", "hangar", "ft shelter"])
+        elif any(term in building_terms for term in ["mosque", "minaret", "muslim"]):
             fillters.extend(["minaret", "mosque"])
-        elif Selected_GeoFeature["building"].lower() in [
-            "cathedral",
-            "chapel",
-            "presbytery",
-        ]:
-            fillters.extend(
-                ["church", "presbytery", "cathedral", "chapel", "monastery"]
-            )
-        elif Selected_GeoFeature["building"].lower() == "warehouse":
+        if any(term in building_terms for term in ["cathedral", "chapel", "presbytery"]):
+            fillters.extend(["church", "presbytery", "cathedral", "chapel", "monastery"])
+        if "warehouse" in building_terms:
             fillters.extend(["12", "warehouse"])
-        elif Selected_GeoFeature["building"].lower() == "synagogue":
+        if "synagogue" in building_terms:
             fillters.extend(["synagogue"])
-        elif Selected_GeoFeature["building"].lower() == "shrine":
+        if "shrine" in building_terms:
             fillters.extend(["shrine"])
-        elif Selected_GeoFeature["building"].lower() == "temple":
+        if "temple" in building_terms:
             fillters.extend(["temple", "monastery"])
 
     if Selected_GeoFeature["aeroway"]:
+        aeroway_terms = split_string(Selected_GeoFeature["aeroway"])
         heli = ["heliport", "helipad"]
-        if Selected_GeoFeature["aeroway"].lower() == "terminal":
+        if "terminal" in aeroway_terms:
             fillters.extend(["terminal"])
-        elif Selected_GeoFeature["aeroway"].lower() == "apron":
+        if "apron" in aeroway_terms:
             fillters.extend(["39", "45", "hangar", "terminal", "depot", "warehouse"])
-        elif Selected_GeoFeature["aeroway"].lower() in heli:
+        if any(term in aeroway_terms for term in heli):
             fillters.extend(["helipad", "13"])
-        elif Selected_GeoFeature["aeroway"].lower() == "windsock":
+        elif "windsock" in aeroway_terms:
             fillters.extend(["windsock"])
-        elif Selected_GeoFeature["aeroway"].lower() == "arresting_gear":
+        elif "arresting_gear" in aeroway_terms:
             fillters.extend(["68"])
-        elif Selected_GeoFeature["aeroway"].lower() == "navigationaid":
+        elif "navigationaid" in aeroway_terms:
             fillters.extend(["25", "localizer", "tacan", "beacon"])
-        elif Selected_GeoFeature["aeroway"].lower() == "tower":
+        elif "tower" in aeroway_terms:
             fillters.extend(["2"])
 
     if Selected_GeoFeature["barrier"]:
-        if Selected_GeoFeature["barrier"].lower() == "border_control":
+        barrier_terms = split_string(Selected_GeoFeature["barrier"])
+        if "border_control" in barrier_terms:
             fillters.extend(["55"])
-        elif Selected_GeoFeature["barrier"].lower() == "fence":
+        if "fence" in barrier_terms:
             fillters.extend(["49"])
 
     if Selected_GeoFeature["man_made"]:
+        man_made_terms = split_string(Selected_GeoFeature["man_made"])
         fire_poles = ["flare", "chimney"]
-        if Selected_GeoFeature["man_made"].lower() == "beacon":
+        if "beacon" in man_made_terms:
             fillters.extend(["beacon"])
-        elif Selected_GeoFeature["man_made"].lower() in fire_poles:
-            fillters.extend(["61", "51", "Release Value"])
-        elif Selected_GeoFeature["man_made"].lower() == "lighting":
+        elif any(term in man_made_terms for term in fire_poles):
+            fillters.extend(["61", "51", "release value"])
+        elif "lighting" in man_made_terms:
             fillters.extend(["46", "lights", "light"])
 
-    ## If there is tower somewhere, its need to be selected "once", with the aligned purposed (and prevent multiple purposes)
     if Selected_GeoFeature["tower"]:
+        tower_terms = split_string(Selected_GeoFeature["tower"])
         watch_tower = ["watchtower", "observation"]
         antennas = ["monitoring", "communication", "na"]
-        if Selected_GeoFeature["tower"].lower() in watch_tower:
-            fillters.extend(["Watchtower"])
-        elif Selected_GeoFeature["tower"].lower() in antennas:
-            fillters.extend(["Radio Tower", "Telecom Tower"])
-        elif Selected_GeoFeature["tower"].lower() == "lighting":
+        if any(term in tower_terms for term in watch_tower):
+            fillters.extend(["watchtower"])
+        if any(term in tower_terms for term in antennas):
+            fillters.extend(["radio tower", "telecom tower"])
+        if "lighting" in tower_terms:
             fillters.extend(["46", "lights", "light"])
-        elif Selected_GeoFeature["tower"].lower() == "minaret":
+        if "minaret" in tower_terms:
             fillters.extend(["minaret", "mosque"])
-        elif Selected_GeoFeature["tower"].lower() == "radar":
+        if "radar" in tower_terms:
             fillters.extend(["radar"])
-        elif Selected_GeoFeature["tower"].lower() in ["control", "traffic"]:
+        if "control" in tower_terms or "traffic" in tower_terms:
             fillters.extend(["2"])
-
     elif Selected_GeoFeature["man_made"]:
+        man_made_terms = split_string(Selected_GeoFeature["man_made"])
         antennas = ["communications_tower", "antenna", "satellite_dish", "telescope"]
-        if Selected_GeoFeature["man_made"].lower() == "tower":
-            if (
-                Selected_GeoFeature["service"]
-                and Selected_GeoFeature["service"].lower() == "aircraft_control"
-            ):
+        if "tower" in man_made_terms:
+            if Selected_GeoFeature["service"] and "aircraft_control" in split_string(Selected_GeoFeature["service"]):
                 fillters.extend(["2"])
             else:
                 fillters.extend(["61", "tower"])
-        elif Selected_GeoFeature["man_made"].lower() == "cooling_tower":
+        if "cooling_tower" in man_made_terms:
             fillters.extend(["53"])
-        elif Selected_GeoFeature["man_made"].lower() in antennas:
+        if any(term in man_made_terms for term in antennas):
             fillters.extend(["29", "43", "antenna", "33", "28", "satellite"])
-        elif Selected_GeoFeature["man_made"].lower() == "communications_tower":
-            fillters.extend(["Radio Tower", "Telecom Tower"])
+        if "communications_tower" in man_made_terms:
+            fillters.extend(["radio tower", "telecom tower"])
 
     if Selected_GeoFeature["power"]:
-        Power = [
-            "compensator",
-            "plant",
-            "substation",
-            "busbar",
-        ]
+        power_terms = split_string(Selected_GeoFeature["power"])
+        power = ["compensator", "plant", "substation", "busbar"]
         electric_tower = ["tower", "terminal", "connection"]
-        if Selected_GeoFeature["power"].lower() in Power:
-            fillters.extend(["23", "converter", "32", "Processor"])
-        elif Selected_GeoFeature["power"].lower() in electric_tower:
+        if any(term in power_terms for term in power):
+            fillters.extend(["23", "converter", "32", "processor","Generator", "Forge"])
+        if any(term in power_terms for term in electric_tower):
             fillters.extend(["20"])
-        elif Selected_GeoFeature["power"].lower() == "converter":
+        if "converter" in power_terms:
             fillters.extend(["converter"])
-        elif Selected_GeoFeature["power"].lower() == "transformer":
+        if "transformer" in power_terms:
             fillters.extend(["transformer"])
+        if "heliostat" in power_terms:
+            fillters.extend(["Solar Mirrors"])
 
-    if (
-        Selected_GeoFeature["man_made"]
-        and Selected_GeoFeature["man_made"].lower()
-        in ["pump", "pumping_station", "works"]
-        or Selected_GeoFeature["building"]
-        and Selected_GeoFeature["building"].lower() == "industrial"
-    ):
+    if (Selected_GeoFeature["man_made"] and any(term in split_string(Selected_GeoFeature["man_made"]) for term in ["pump", "pumping_station", "works"])) or \
+       (Selected_GeoFeature["building"] and "industrial" in split_string(Selected_GeoFeature["building"])):
         fillters.extend(["32", "53", "60", "56", "23", "6"])
-    if (
-        Selected_GeoFeature["man_made"]
-        and Selected_GeoFeature["man_made"].lower() == "pipeline"
-    ):
+
+    if Selected_GeoFeature["man_made"] and "pipeline" in split_string(Selected_GeoFeature["man_made"]):
         fillters.extend(["piping"])
 
-    if (
-        Selected_GeoFeature["building"]
-        and Selected_GeoFeature["building"].lower()
-        in ["gasometer", "storage_tank", "fuel"]
-        or Selected_GeoFeature["man_made"]
-        and Selected_GeoFeature["man_made"].lower()
-        in ["gasometer", "storage_tank", "fuel"]
-    ):
+    if (Selected_GeoFeature["building"] and any(term in split_string(Selected_GeoFeature["building"]) for term in ["gasometer", "storage_tank", "fuel", "tank"])) or \
+       (Selected_GeoFeature["man_made"] and any(term in split_string(Selected_GeoFeature["man_made"]) for term in ["gasometer", "storage_tank", "fuel", "tank"])):
         fillters.extend(["48", "fuel", "gas"])
-    if (
-        Selected_GeoFeature["building"]
-        and Selected_GeoFeature["building"].lower() == "silo"
-        or Selected_GeoFeature["man_made"]
-        and Selected_GeoFeature["man_made"].lower() == "silo"
-    ):
+
+    if (Selected_GeoFeature["building"] and "silo" in split_string(Selected_GeoFeature["building"])) or \
+       (Selected_GeoFeature["man_made"] and "silo" in split_string(Selected_GeoFeature["man_made"])):
         fillters.extend(["silo"])
-    if (
-        Selected_GeoFeature["building"]
-        and Selected_GeoFeature["building"].lower() == "water_tower"
-        or Selected_GeoFeature["man_made"]
-        and Selected_GeoFeature["man_made"].lower() == "water_tower"
-    ):
+
+    if (Selected_GeoFeature["building"] and "water_tower" in split_string(Selected_GeoFeature["building"])) or \
+       (Selected_GeoFeature["man_made"] and "water_tower" in split_string(Selected_GeoFeature["man_made"])):
         fillters.extend(["37"])
 
-    if (
-        Selected_GeoFeature["building"]
-        and Selected_GeoFeature["building"].lower() in ["bridge", "bridges"]
-        or Selected_GeoFeature["man_made"]
-        and Selected_GeoFeature["man_made"].lower() in ["bridge", "bridges"]
-        or Selected_GeoFeature["bridge"]
-    ):
+    if (Selected_GeoFeature["building"] and any(term in split_string(Selected_GeoFeature["building"]) for term in ["bridge", "bridges"])) or \
+       (Selected_GeoFeature["man_made"] and any(term in split_string(Selected_GeoFeature["man_made"]) for term in ["bridge", "bridges"])) or \
+       Selected_GeoFeature["bridge"]:
         fillters.extend(["16"])
 
-    if (
-        Selected_GeoFeature["building"]
-        and Selected_GeoFeature["building"].lower() == "hospital"
-        or Selected_GeoFeature["amenity"]
-        and Selected_GeoFeature["amenity"].lower() == "hospital"
-    ):
+    if (Selected_GeoFeature["building"] and "hospital" in split_string(Selected_GeoFeature["building"])) or \
+       (Selected_GeoFeature["amenity"] and "hospital" in split_string(Selected_GeoFeature["amenity"])):
         fillters.extend(["62"])
 
-    if (
-        Selected_GeoFeature["military"]
-        and Selected_GeoFeature["military"].lower() == "bunker"
-        or Selected_GeoFeature["building"]
-        and Selected_GeoFeature["building"].lower() == "bunker"
-    ):
+    if (Selected_GeoFeature["military"] and "bunker" in split_string(Selected_GeoFeature["military"])) or \
+       (Selected_GeoFeature["building"] and "bunker" in split_string(Selected_GeoFeature["building"])):
         fillters.extend(["4", "bunker"])
 
     barracks = ["barrack", "barracks"]
-    if (
-        Selected_GeoFeature["building"]
-        and Selected_GeoFeature["building"].lower() in barracks
-        or Selected_GeoFeature["military"]
-        and Selected_GeoFeature["military"].lower() in barracks
-    ):
+    if (Selected_GeoFeature["building"] and any(term in split_string(Selected_GeoFeature["building"]) for term in barracks)) or \
+       (Selected_GeoFeature["military"] and any(term in split_string(Selected_GeoFeature["military"]) for term in barracks)):
         fillters.extend(["12", "35", "10"])
 
-    if Selected_GeoFeature["military"] and Selected_GeoFeature["military"].lower() in [
-        "ammo",
-        "ammunition",
-        "munition",
-    ]:
+    if Selected_GeoFeature["military"] and any(term in split_string(Selected_GeoFeature["military"]) for term in ["ammo", "ammunition", "munition"]):
         fillters.extend(["ammo", "ammunition", "munition", "bunker"])
 
-    # convert list into string
     filters_str = ", ".join(fillters)
-    # Get database through new fillters, if fillters are not defined then
     if filters_str != "":
         Accurate_filltered_BMSmodels = Load_Db(Db_path, filters_str)
         return Accurate_filltered_BMSmodels
     else:
         return None
 
-
-
-
+def split_string(s):
+    """Split a string by multiple delimiters and return a list of lowercase terms"""
+    return [term.strip().lower() for term in re.split(r'[,\s/\\.]', s) if term.strip()]

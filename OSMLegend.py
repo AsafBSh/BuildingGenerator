@@ -77,7 +77,7 @@ class OSMLegend(tk.Toplevel):
         window.tree.insert(
             building,
             "end",
-            values=("fuel, gasometer, storage_tank", "fuel, gas", "Storage Tank"),
+            values=("fuel, gasometer, storage_tank, tank", "fuel, gas", "Storage Tank"),
         )
         window.tree.insert(
             building, "end", values=("hangar", "HAS, hangar, FT Shelter")
@@ -131,7 +131,7 @@ class OSMLegend(tk.Toplevel):
         window.tree.insert(
             man_made,
             "end",
-            values=("gasometer, storage_tank,fuel", "fuel, gas", "Storage Tank"),
+            values=("gasometer, storage_tank,fuel, tank", "fuel, gas", "Storage Tank"),
         )
         window.tree.insert(
             man_made, "end", values=("lighting", "lights,light", "Lights")
@@ -187,7 +187,7 @@ class OSMLegend(tk.Toplevel):
             "end",
             values=(
                 "compensator, plant, substation",
-                "converter, Processor",
+                "converter, Processor, Generator, Forge",
                 "Power Plant, Refinery",
             ),
         )
@@ -196,6 +196,7 @@ class OSMLegend(tk.Toplevel):
         )
         window.tree.insert(power, "end", values=("converter", "converter"))
         window.tree.insert(power, "end", values=("transformer", "transformer"))
+        window.tree.insert(power, "end", values=("heliostat", "Solar Mirrors"))
         # Add sport items
         sport = window.tree.insert("", "end", text="sport")
         # Children for sport
