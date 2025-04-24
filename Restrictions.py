@@ -12,6 +12,7 @@ class RestrictionsWindow(tk.Toplevel):
         self.geometry("600x400")
         self.resizable(True, True)
         self.title("Restriction Window")
+        self.configure(bg="#E7F3F7")  # Set window background color
         """Will show all the restrictions that are available in BMS"""
         # disable button
         self.restriction_button.configure(state="disabled")
@@ -92,7 +93,7 @@ class RestrictionsWindow(tk.Toplevel):
         checkboxes = {}
 
         # Create a scrolled frame to hold the checkboxes
-        scrolled_frame = Ctk.CTkScrollableFrame(self)
+        scrolled_frame = Ctk.CTkScrollableFrame(self, fg_color="#E7F3F7")  # Set frame background color
         scrolled_frame.pack(fill="both", expand=True, pady=5, padx=5)
 
         # Check the checkboxes based on the numbers in the restriction box

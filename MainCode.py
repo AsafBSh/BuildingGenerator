@@ -12,6 +12,7 @@ import matplotlib.pyplot as MatPlt
 from scipy.spatial.distance import cdist
 from collections import Counter
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+from utils.file_manager import FileManager
 
 
 # Load the data from the database
@@ -141,122 +142,231 @@ def Show_Selected_Features_2D(
     feature_entries=None,
     models_FrameData=None,
 ):
-    # Initialize an empty list to hold the axes
-    axes = []
-
-    if plot_option in ["JSON_BondingBox", "Both"]:
-        # Plot the 'selected_buildings'
-        fig, ax = MatPlt.subplots(figsize=(6, 6))  # Create a figure with one subplot
-        axes.append(ax)
+    # Create a single figure for all visualizations
+    fig = MatPlt.figure(figsize=(10, 8))
+    
+    # Create coordinate limits based on all data for consistent scaling
+    x_coords = []
+    y_coords = []
+    
+    # Collect all coordinates for proper scaling
+    if buildings is not None:
         for i in range(len(buildings)):
-            feature = buildings.iloc[i]
+            x_coords.append(Calc_data[i, 5])
+            y_coords.append(Calc_data[i, 6])
+    
+    if feature_entries is not None:
+        for entry in feature_entries:
+            entry_parts = entry.split()
+            x_coords.append(float(entry_parts[2]))
+            y_coords.append(float(entry_parts[1]))
+    
+    # Calculate padding for axes limits
+    if x_coords and y_coords:
+        x_min, x_max = min(x_coords), max(x_coords)
+        y_min, y_max = min(y_coords), max(y_coords)
+        x_padding = (x_max - x_min) * 0.15
+        y_padding = (y_max - y_min) * 0.15
+        x_limits = [x_min - x_padding, x_max + x_padding]
+        y_limits = [y_min - y_padding, y_max + y_padding]
+    else:
+        x_limits = [-2000, 2000]
+        y_limits = [-2000, 2000]
+
+    # Create the appropriate number of subplots based on plot_option
+    if plot_option == "Both":
+        # Both side-by-side and combined view
+        gs = MatPlt.GridSpec(2, 2, height_ratios=[1, 1])
+        ax1 = fig.add_subplot(gs[0, 0])  # GeoJSON only
+        ax2 = fig.add_subplot(gs[0, 1])  # BMS only
+        ax3 = fig.add_subplot(gs[1, :])  # Combined view
+        axes = [ax1, ax2, ax3]
+        titles = ["Selected Buildings from JSON", "Feature Entries from BMS", "Combined View"]
+    else:
+        # Single view
+        ax = fig.add_subplot(111)
+        axes = [ax]
+        titles = ["Selected Buildings from JSON" if plot_option == "JSON_BondingBox" else "Feature Entries from BMS"]
+
+    # Create a function to draw buildings with better styling
+    def draw_buildings(ax, buildings_data, calc_data, color, alpha, is_geo=True):
+        for i in range(len(buildings_data)):
+            feature = buildings_data.iloc[i]
             length = feature["length"]
             width = feature["width"]
+            
+            # Use consistent rotation based on the current solution
             rotation = (feature["rotation"] + 90) % 360
-
-            # # Extract radius and angle from calc_features
-            x_distance = Calc_data[i, 5]
-            y_distance = Calc_data[i, 6]
-
-            # Calculate the corner points of the rectangle
-            corner_points = np.array(
-                [
-                    [-width / 2, -length / 2],
-                    [width / 2, -length / 2],
-                    [width / 2, length / 2],
-                    [-width / 2, length / 2],
-                ]
-            )
-
-            # Apply rotation to the corner points
-            rotation_matrix = np.array(
-                [
-                    [np.cos(np.radians(rotation)), -np.sin(np.radians(rotation))],
-                    [np.sin(np.radians(rotation)), np.cos(np.radians(rotation))],
-                ]
-            )
-            rotated_corner_points = np.dot(corner_points, rotation_matrix.T)
-
-            # Translate the corner points to the center
-            translated_corner_points = rotated_corner_points + [y_distance, x_distance]
-
-            # Append the first point to the end to close the shape
-            translated_corner_points = np.concatenate(
-                [translated_corner_points, translated_corner_points[0:1]]
-            )
-
-            # Plot the points for the first subplot
-            axes[0].plot(
-                translated_corner_points[:, 1], translated_corner_points[:, 0], "b-"
-            )
-
-        axes[0].set_title("Selected Buildings from JSON")
-
-        # Plot the 'feature_entries'
-    if plot_option in ["BMS_Fitting", "Both"]:
-        fig, ax = MatPlt.subplots(figsize=(6, 6))  # Create a figure with one subplot
-        axes.append(ax)
-        for i, entry in enumerate(feature_entries):
+            
+            # Extract coordinates
+            x_distance = calc_data[i, 5]
+            y_distance = calc_data[i, 6]
+            
+            # Calculate corner points
+            corner_points = np.array([
+                [-width / 2, -length / 2],
+                [width / 2, -length / 2],
+                [width / 2, length / 2],
+                [-width / 2, length / 2],
+            ])
+            
+            # Apply rotation
+            rotation_matrix = np.array([
+                [np.cos(np.radians(rotation)), -np.sin(np.radians(rotation))],
+                [np.sin(np.radians(rotation)), np.cos(np.radians(rotation))],
+            ])
+            rotated_points = np.dot(corner_points, rotation_matrix.T)
+            
+            # Translate points
+            translated_points = rotated_points + [y_distance, x_distance]
+            
+            # Close the shape
+            translated_points = np.concatenate([translated_points, translated_points[0:1]])
+            
+            # Plot building outline
+            ax.plot(translated_points[:, 1], translated_points[:, 0], color=color, linewidth=1.5, alpha=alpha)
+            
+            # Fill building with color
+            ax.fill(translated_points[:, 1], translated_points[:, 0], color=color, alpha=alpha*0.3)
+            
+            # Add label at center
+            if is_geo:
+                label = f"B{i}"
+                tooltip = f"Building {i}: {length:.1f}×{width:.1f}ft"
+            else:
+                label = f"{i}"
+                name = feature.get("name", "")
+                tooltip = f"{name}: {length:.1f}×{width:.1f}ft"
+            
+            ax.text(x_distance, y_distance, label, ha='center', va='center', 
+                   fontsize=8, color='black', weight='bold', alpha=0.7)
+    
+    # Function to draw BMS features
+    def draw_features(ax, entries, models_data, color, alpha):
+        for i, entry in enumerate(entries):
             entry_parts = entry.split()
-            ct_number = int(
-                re.search(r"\d+", entry_parts[0]).group()
-            )  # Extract digits from the string and convert to integer
-
-            # Fetch the row from GeoFeatures using CTNumber
-            model_data = models_FrameData[
-                models_FrameData["CTNumber"].astype(str).str.contains(str(ct_number))
-            ]
-
-            model_width, model_length = (
-                model_data.iloc[0]["Width"],
-                model_data.iloc[0]["Length"],
-            )
-
-            # Extract other parameters from the entry
+            ct_number = int(re.search(r"\d+", entry_parts[0]).group())
+            
+            # Find model data
+            model_data = models_data[models_data["CTNumber"].astype(str).str.contains(str(ct_number))]
+            if model_data.empty:
+                continue
+                
+            model_width = model_data.iloc[0]["Width"]
+            model_length = model_data.iloc[0]["Length"]
+            
+            # Get coordinates and rotation
             y_distance, x_distance = map(float, entry_parts[1:3])
             rotation = float(entry_parts[4])
-            # Note!! returning the Y and X coordinations to its proper place after editor switching
-
-            # Calculate the corner points of the rectangle
-            corner_points = np.array(
-                [
-                    [-model_width / 2, -model_length / 2],
-                    [model_width / 2, -model_length / 2],
-                    [model_width / 2, model_length / 2],
-                    [-model_width / 2, model_length / 2],
-                ]
-            )
-
-            # Apply rotation to the corner points
-            rotation_matrix = np.array(
-                [
-                    [np.cos(np.radians(rotation)), -np.sin(np.radians(rotation))],
-                    [np.sin(np.radians(rotation)), np.cos(np.radians(rotation))],
-                ]
-            )
-            rotated_corner_points = np.dot(corner_points, rotation_matrix.T)
-
-            # Translate the corner points to the center
-            translated_corner_points = rotated_corner_points + [y_distance, x_distance]
-            # Append the first point to the end to close the shape
-            translated_corner_points = np.concatenate(
-                [translated_corner_points, translated_corner_points[0:1]]
-            )
-
-            # Plot the points for the second subplot
-            axes[-1].plot(
-                translated_corner_points[:, 1], translated_corner_points[:, 0], "r-"
-            )
-
-        axes[-1].set_title("Feature Entries generated from BMS")
-
-    for ax in axes:
+            
+            # Adjust rotation based on LengthIdx
+            if model_data.iloc[0]["LengthIdx"] == 0:
+                rotation = (rotation + 90) % 360
+            
+            # Calculate corner points
+            corner_points = np.array([
+                [-model_width / 2, -model_length / 2],
+                [model_width / 2, -model_length / 2],
+                [model_width / 2, model_length / 2],
+                [-model_width / 2, model_length / 2],
+            ])
+            
+            # Apply rotation
+            rotation_matrix = np.array([
+                [np.cos(np.radians(rotation)), -np.sin(np.radians(rotation))],
+                [np.sin(np.radians(rotation)), np.cos(np.radians(rotation))],
+            ])
+            rotated_points = np.dot(corner_points, rotation_matrix.T)
+            
+            # Translate points
+            translated_points = rotated_points + [y_distance, x_distance]
+            
+            # Close the shape
+            translated_points = np.concatenate([translated_points, translated_points[0:1]])
+            
+            # Plot building outline
+            ax.plot(translated_points[:, 1], translated_points[:, 0], color=color, linewidth=1.5, alpha=alpha)
+            
+            # Fill building with color
+            ax.fill(translated_points[:, 1], translated_points[:, 0], color=color, alpha=alpha*0.3)
+            
+            # Add label
+            feature_name = model_data.iloc[0]["FeatureName"]
+            short_name = f"F{i}"
+            ax.text(x_distance, y_distance, short_name, ha='center', va='center', 
+                   fontsize=8, color='black', weight='bold', alpha=0.7)
+    
+    # Draw the appropriate content on each axis
+    for idx, ax in enumerate(axes):
+        # Configure common axis properties
         ax.set_xlabel("X [feet]")
         ax.set_ylabel("Y [feet]")
-        ax.axis("equal")
-        ax.grid(True)
-
+        ax.grid(True, linestyle='--', alpha=0.6)
+        ax.set_title(titles[idx])
+        
+        # Set consistent axis limits
+        ax.set_xlim(x_limits)
+        ax.set_ylim(y_limits)
+        
+        # Draw content based on plot option and current axis
+        if plot_option == "Both":
+            if idx == 0 and buildings is not None:
+                # GeoJSON buildings only
+                draw_buildings(ax, buildings, Calc_data, 'blue', 0.8, True)
+                ax.set_aspect('equal')
+            
+            elif idx == 1 and feature_entries is not None:
+                # BMS features only
+                draw_features(ax, feature_entries, models_FrameData, 'red', 0.8)
+                ax.set_aspect('equal')
+            
+            elif idx == 2:
+                # Combined view
+                if buildings is not None:
+                    draw_buildings(ax, buildings, Calc_data, 'blue', 0.7, True)
+                if feature_entries is not None:
+                    draw_features(ax, feature_entries, models_FrameData, 'red', 0.7)
+                ax.set_aspect('equal')
+                
+                # Add legend for combined view
+                from matplotlib.patches import Patch
+                geo_patch = Patch(color='blue', alpha=0.3, label='GeoJSON Buildings')
+                bms_patch = Patch(color='red', alpha=0.3, label='BMS Features')
+                ax.legend(handles=[geo_patch, bms_patch], loc='upper right')
+        
+        else:
+            # Single view
+            if plot_option == "JSON_BondingBox" and buildings is not None:
+                draw_buildings(ax, buildings, Calc_data, 'blue', 0.8, True)
+            elif plot_option == "BMS_Fitting" and feature_entries is not None:
+                draw_features(ax, feature_entries, models_FrameData, 'red', 0.8)
+            ax.set_aspect('equal')
+    
+    # Add a scale bar on the combined view or single view
+    scale_bar_ax = axes[-1]
+    scale_length = 100  # 100 feet scale bar
+    x_pos = x_limits[0] + (x_limits[1] - x_limits[0]) * 0.05
+    y_pos = y_limits[0] + (y_limits[1] - y_limits[0]) * 0.05
+    scale_bar_ax.plot([x_pos, x_pos + scale_length], [y_pos, y_pos], 'k-', linewidth=2)
+    scale_bar_ax.text(x_pos + scale_length/2, y_pos - (y_limits[1] - y_limits[0]) * 0.02, 
+                     f"{scale_length} feet", ha='center', va='top')
+    
+    # Add a compass indicator in the corner
+    compass_ax = axes[-1]
+    compass_size = min(x_limits[1] - x_limits[0], y_limits[1] - y_limits[0]) * 0.05
+    compass_x = x_limits[1] - (x_limits[1] - x_limits[0]) * 0.1
+    compass_y = y_limits[1] - (y_limits[1] - y_limits[0]) * 0.1
+    
+    # Draw compass
+    compass_ax.arrow(compass_x, compass_y, 0, compass_size, head_width=compass_size*0.3, 
+                    head_length=compass_size*0.3, fc='k', ec='k')
+    compass_ax.text(compass_x, compass_y + compass_size*1.2, 'N', ha='center', va='center', fontweight='bold')
+    
+    # Adjust layout and show
+    fig.tight_layout()
     MatPlt.show()
+    
+    return axes
 
 
 def Show_Selected_Features_3D(
@@ -266,10 +376,10 @@ def Show_Selected_Features_3D(
     feature_entries=None,
     models_FrameData=None,
 ):
-    # Initialize an empty list to hold the axes
-    axes = []
-
-    # Initialize variables to stor the min and max values for each axis
+    # Create a figure
+    fig = MatPlt.figure(figsize=(10, 8))
+    
+    # Initialize variables to store the min and max values for each axis
     x_min, x_max, y_min, y_max, z_max = (
         float("inf"),
         float("-inf"),
@@ -277,207 +387,298 @@ def Show_Selected_Features_3D(
         float("-inf"),
         float("-inf"),
     )
-
-    if plot_option in ["JSON_BondingBox", "Both"]:
-        fig = MatPlt.figure(figsize=(6, 6))
-        ax = fig.add_subplot(111, projection="3d")  # Create a 3D subplot
-        axes.append(ax)
-
-        # Plot the 'selected_buildings'
+    
+    # Collect data from both sources to determine proper axis limits
+    building_data = []
+    feature_data = []
+    
+    # Process building data if available
+    if buildings is not None and len(buildings) > 0:
         for i in range(len(buildings)):
             feature = buildings.iloc[i]
             length = feature["length"]
             width = feature["width"]
             height = Calc_data[i, 1]
             rotation = (feature["rotation"] + 90) % 360
-
-            # Extract radius and angle from calc_features
             x_distance = Calc_data[i, 5]
             y_distance = Calc_data[i, 6]
-
-            # Calculate the corner points of the rectangle
-            corner_points = np.array(
-                [
-                    [-width / 2, -length / 2, 0],
-                    [width / 2, -length / 2, 0],
-                    [width / 2, length / 2, 0],
-                    [-width / 2, length / 2, 0],
-                    [-width / 2, -length / 2, height],
-                    [width / 2, -length / 2, height],
-                    [width / 2, length / 2, height],
-                    [-width / 2, length / 2, height],
-                ]
-            )
-
-            # Apply rotation to the corner points
-            rotation_matrix = np.array(
-                [
-                    [np.cos(np.radians(rotation)), -np.sin(np.radians(rotation)), 0],
-                    [np.sin(np.radians(rotation)), np.cos(np.radians(rotation)), 0],
-                    [0, 0, 1],
-                ]
-            )
-            rotated_corner_points = np.dot(corner_points, rotation_matrix.T)
-
-            # Translate the corner points to the center
-            translated_corner_points = rotated_corner_points + [
-                y_distance,
-                x_distance,
-                0,
-            ]
-
-            # Append the first point to the end to close the shape
-            translated_corner_points = np.concatenate(
-                [translated_corner_points, translated_corner_points[0:1]]
-            )
-
-            # Update the min and max values for each axis
-            x_min = min(x_min, np.min(translated_corner_points[:, 0]))
-            x_max = max(x_max, np.max(translated_corner_points[:, 0]))
-            y_min = min(y_min, np.min(translated_corner_points[:, 1]))
-            y_max = max(y_max, np.max(translated_corner_points[:, 1]))
-            z_max = max(z_max, np.max(translated_corner_points[:, 2]))
-
-            # Create a 3D polygon and add it to the plot
-            faces = np.array(
-                [
-                    [translated_corner_points[i] for i in [0, 1, 5, 4]],
-                    [translated_corner_points[i] for i in [1, 2, 6, 5]],
-                    [translated_corner_points[i] for i in [2, 3, 7, 6]],
-                    [translated_corner_points[i] for i in [3, 0, 4, 7]],
-                    [translated_corner_points[i] for i in [0, 1, 2, 3]],
-                    [translated_corner_points[i] for i in [0, 1, 5, 4]],
-                    [translated_corner_points[i] for i in [4, 5, 6, 7]],
-                ]
-            )
-
-            for face in faces:
-                z = np.array([face[:, 2]])
-                verts = [list(zip(face[:, 0], face[:, 1], z[0]))]
-                ax.add_collection3d(
-                    Poly3DCollection(
-                        verts,
-                        facecolors="blue",
-                        linewidths=1,
-                        edgecolors="b",
-                        alpha=0.25,
-                    )
-                )
-
-        axes[0].set_title("3D Selected Buildings from JSON")
-
-    if plot_option in ["BMS_Fitting", "Both"]:
-        fig = MatPlt.figure(figsize=(6, 6))
-        ax = fig.add_subplot(111, projection="3d")  # Create a 3D subplot
-        axes.append(ax)
-
-        # Plot the 'feature_entries'
+            
+            building_data.append({
+                "length": length,
+                "width": width,
+                "height": height,
+                "rotation": rotation,
+                "x": x_distance,
+                "y": y_distance,
+                "idx": i,
+                "name": f"B{i}",
+                "type": "geo"
+            })
+            
+            # Update bounds
+            x_min = min(x_min, x_distance - width/2, x_distance + width/2)
+            x_max = max(x_max, x_distance - width/2, x_distance + width/2)
+            y_min = min(y_min, y_distance - length/2, y_distance + length/2)
+            y_max = max(y_max, y_distance - length/2, y_distance + length/2)
+            z_max = max(z_max, height)
+    
+    # Process feature data if available
+    if feature_entries is not None and len(feature_entries) > 0:
         for i, entry in enumerate(feature_entries):
             entry_parts = entry.split()
-            ct_number = int(
-                re.search(r"\d+", entry_parts[0]).group()
-            )  # Extract digits from the string and convert to integer
-
-            # Fetch the row from GeoFeatures using CTNumber
+            ct_number = int(re.search(r"\d+", entry_parts[0]).group())
+            
+            # Find model data
             model_data = models_FrameData[
                 models_FrameData["CTNumber"].astype(str).str.contains(str(ct_number))
             ]
-            if not model_data.empty:
-                model_width, model_length, model_height = (
-                    model_data.iloc[0]["Width"],
-                    model_data.iloc[0]["Length"],
-                    model_data.iloc[0]["Height"],
-                )
-
-                # Extract other parameters from the entry
-                y_distance, x_distance, z_height, rotation = map(
-                    float, entry_parts[1:5]
-                )
-                # Note!! returning the Y and X coordinations to its proper place after editor switching
-
-            # Calculate the corner points of the rectangle
-            corner_points = np.array(
-                [
-                    [-model_width / 2, -model_length / 2, 0],
-                    [model_width / 2, -model_length / 2, 0],
-                    [model_width / 2, model_length / 2, 0],
-                    [-model_width / 2, model_length / 2, 0],
-                    [-model_width / 2, -model_length / 2, model_height],
-                    [model_width / 2, -model_length / 2, model_height],
-                    [model_width / 2, model_length / 2, model_height],
-                    [-model_width / 2, model_length / 2, model_height],
-                ]
+            if model_data.empty:
+                continue
+                
+            model_width = model_data.iloc[0]["Width"]
+            model_length = model_data.iloc[0]["Length"]
+            model_height = model_data.iloc[0]["Height"]
+            
+            # Get coordinates and rotation
+            y_distance, x_distance = map(float, entry_parts[1:3])
+            if len(entry_parts) >= 4:
+                z_height = float(entry_parts[3])
+            else:
+                z_height = 0.0
+                
+            rotation = float(entry_parts[4]) if len(entry_parts) >= 5 else 0.0
+            
+            # Adjust rotation based on LengthIdx
+            if model_data.iloc[0]["LengthIdx"] == 0:
+                rotation = (rotation + 90) % 360
+            
+            feature_data.append({
+                "length": model_length,
+                "width": model_width,
+                "height": model_height,
+                "rotation": rotation,
+                "x": x_distance,
+                "y": y_distance,
+                "z": z_height,
+                "idx": i,
+                "name": model_data.iloc[0]["FeatureName"],
+                "type": "bms"
+            })
+            
+            # Update bounds
+            x_min = min(x_min, x_distance - model_width/2, x_distance + model_width/2)
+            x_max = max(x_max, x_distance - model_width/2, x_distance + model_width/2)
+            y_min = min(y_min, y_distance - model_length/2, y_distance + model_length/2)
+            y_max = max(y_max, y_distance - model_length/2, y_distance + model_length/2)
+            z_max = max(z_max, model_height)
+    
+    # Apply padding to bounds
+    x_range = x_max - x_min
+    y_range = y_max - y_min
+    padding = max(x_range, y_range) * 0.15
+    
+    x_min -= padding
+    x_max += padding
+    y_min -= padding
+    y_max += padding
+    z_max *= 1.1  # Add 10% to height
+    
+    # Create subplots based on plot_option
+    if plot_option == "Both":
+        # Create side-by-side view only (no combined view)
+        gs = MatPlt.GridSpec(1, 2)
+        ax1 = fig.add_subplot(gs[0, 0], projection='3d')  # GeoJSON only
+        ax2 = fig.add_subplot(gs[0, 1], projection='3d')  # BMS only
+        axes = [ax1, ax2]
+        titles = ["3D Selected Buildings from JSON", "3D Feature Entries from BMS"]
+    else:
+        # Create a single subplot
+        ax = fig.add_subplot(111, projection='3d')
+        axes = [ax]
+        titles = ["3D Selected Buildings from JSON" if plot_option == "JSON_BondingBox" else "3D Feature Entries from BMS"]
+    
+    # Function to create a building with proper color and style
+    def create_building_3d(ax, building, alpha=0.6, color='blue', wireframe=False):
+        length = building["length"]
+        width = building["width"]
+        height = building["height"]
+        rotation = building["rotation"]
+        x_distance = building["x"]
+        y_distance = building["y"]
+        z_distance = building.get("z", 0)
+        
+        # Create corner points for the building (bottom and top)
+        corner_points = np.array([
+            [-width / 2, -length / 2, 0],
+            [width / 2, -length / 2, 0],
+            [width / 2, length / 2, 0],
+            [-width / 2, length / 2, 0],
+            [-width / 2, -length / 2, height],
+            [width / 2, -length / 2, height],
+            [width / 2, length / 2, height],
+            [-width / 2, length / 2, height],
+        ])
+        
+        # Apply rotation
+        rotation_matrix = np.array([
+            [np.cos(np.radians(rotation)), -np.sin(np.radians(rotation)), 0],
+            [np.sin(np.radians(rotation)), np.cos(np.radians(rotation)), 0],
+            [0, 0, 1],
+        ])
+        rotated_points = np.dot(corner_points, rotation_matrix.T)
+        
+        # Translate the points
+        translated_points = rotated_points + [y_distance, x_distance, z_distance]
+        
+        # Define the faces of the building
+        faces = [
+            [translated_points[i] for i in [0, 1, 5, 4]],  # Front face
+            [translated_points[i] for i in [1, 2, 6, 5]],  # Right face
+            [translated_points[i] for i in [2, 3, 7, 6]],  # Back face
+            [translated_points[i] for i in [3, 0, 4, 7]],  # Left face
+            [translated_points[i] for i in [0, 1, 2, 3]],  # Bottom face
+            [translated_points[i] for i in [4, 5, 6, 7]],  # Top face
+        ]
+        
+        # Determine color based on height if not specified
+        if color == 'auto':
+            import matplotlib.cm as cm
+            norm_height = building["height"] / z_max if z_max > 0 else 0.5
+            color = cm.viridis(norm_height)
+        
+        # Draw each face with proper coloring
+        for face in faces:
+            face_array = np.array(face)
+            z_values = np.array([face_array[:, 2]])
+            verts = [list(zip(face_array[:, 0], face_array[:, 1], z_values[0]))]
+            
+            # Add the polygon to the plot
+            poly = Poly3DCollection(
+                verts,
+                facecolors=color,
+                linewidths=1.5 if wireframe else 0.5,
+                edgecolors='k',
+                alpha=alpha
             )
-
-            # Apply rotation to the corner points
-            rotation_matrix = np.array(
-                [
-                    [np.cos(np.radians(rotation)), -np.sin(np.radians(rotation)), 0],
-                    [np.sin(np.radians(rotation)), np.cos(np.radians(rotation)), 0],
-                    [0, 0, 1],
-                ]
+            ax.add_collection3d(poly)
+        
+        # Draw building shadow on the ground
+        if not wireframe:
+            ground_shadow = np.array([
+                [translated_points[i][0], translated_points[i][1], 0] for i in range(4)
+            ])
+            shadow_verts = [list(zip(ground_shadow[:, 0], ground_shadow[:, 1], ground_shadow[:, 2]))]
+            shadow = Poly3DCollection(
+                shadow_verts,
+                facecolors='gray',
+                linewidths=0,
+                alpha=0.15
             )
-            rotated_corner_points = np.dot(corner_points, rotation_matrix.T)
-
-            # Translate the corner points to the center
-            translated_corner_points = rotated_corner_points + [
-                y_distance,
-                x_distance,
-                0,
-            ]
-
-            # Append the first point to the end to close the shape
-            translated_corner_points = np.concatenate(
-                [translated_corner_points, translated_corner_points[0:1]]
-            )
-
-            # Update the min and max values for each axis
-            x_min = min(x_min, np.min(translated_corner_points[:, 0]))
-            x_max = max(x_max, np.max(translated_corner_points[:, 0]))
-            y_min = min(y_min, np.min(translated_corner_points[:, 1]))
-            y_max = max(y_max, np.max(translated_corner_points[:, 1]))
-            z_max = max(z_max, np.max(translated_corner_points[:, 2]))
-
-            # Create a 3D polygon and add it to the plot
-            faces = np.array(
-                [
-                    [translated_corner_points[i] for i in [0, 1, 5, 4]],
-                    [translated_corner_points[i] for i in [1, 2, 6, 5]],
-                    [translated_corner_points[i] for i in [2, 3, 7, 6]],
-                    [translated_corner_points[i] for i in [3, 0, 4, 7]],
-                    [translated_corner_points[i] for i in [0, 1, 2, 3]],
-                    [translated_corner_points[i] for i in [0, 1, 5, 4]],
-                    [translated_corner_points[i] for i in [4, 5, 6, 7]],
-                ]
-            )
-
-            for face in faces:
-                z = np.array([face[:, 2]])
-                verts = [list(zip(face[:, 0], face[:, 1], z[0]))]
-                ax.add_collection3d(
-                    Poly3DCollection(
-                        verts,
-                        facecolors="blue",
-                        linewidths=1,
-                        edgecolors="r",
-                        alpha=0.25,
-                    )
-                )
-
-        axes[-1].set_title("3D Feature Entries generated from BMS")
-
-    for ax in axes:
-        ax.set_xlabel("X [feet]")
-        ax.set_ylabel("Y [feet]")
-        ax.set_zlabel("Z [feet]")
-        ax.grid(True)  # Add a grid to the plot
-
-        # Set the limits of the axes
-        ax.set_xlim([x_min * 1.1, x_max * 1.1])
-        ax.set_ylim([y_min * 1.1, y_max * 1.1])
-        ax.set_zlim([0, z_max * 2])
-
+            ax.add_collection3d(shadow)
+        
+        return translated_points
+    
+    # Create ground plane function
+    def create_ground_plane(ax, x_min, x_max, y_min, y_max):
+        # Create a grid for the ground plane
+        x_grid, y_grid = np.meshgrid(
+            np.linspace(x_min, x_max, 20),
+            np.linspace(y_min, y_max, 20)
+        )
+        z_grid = np.zeros_like(x_grid)
+        
+        # Plot the ground plane
+        ax.plot_surface(
+            y_grid, x_grid, z_grid,
+            color='lightgray',
+            alpha=0.2,
+            antialiased=True,
+            shade=False
+        )
+        
+        # Add grid lines
+        grid_alpha = 0.1
+        grid_spacing = min(x_max - x_min, y_max - y_min) / 10
+        
+        for x in np.arange(x_min, x_max, grid_spacing):
+            ax.plot([y_min, y_max], [x, x], [0, 0], 'k-', alpha=grid_alpha)
+            
+        for y in np.arange(y_min, y_max, grid_spacing):
+            ax.plot([y, y], [x_min, x_max], [0, 0], 'k-', alpha=grid_alpha)
+    
+    # Setup and draw each axis
+    for idx, ax in enumerate(axes):
+        # Common axis settings
+        ax.set_xlabel('X [feet]')
+        ax.set_ylabel('Y [feet]')
+        ax.set_zlabel('Z [feet]')
+        ax.set_title(titles[idx])
+        
+        # Set consistent axis limits
+        ax.set_xlim([y_min, y_max])  # X and Y are flipped in the 3D view
+        ax.set_ylim([x_min, x_max])
+        ax.set_zlim([0, z_max * 1.2])
+        
+        # Set optimal viewing angle
+        ax.view_init(elev=30, azim=225)
+        
+        # Add ground plane
+        create_ground_plane(ax, x_min, x_max, y_min, y_max)
+        
+        # Draw the appropriate content based on plot_option and current axis
+        if plot_option == "Both":
+            if idx == 0 and building_data:
+                # Draw GeoJSON buildings only
+                for building in building_data:
+                    create_building_3d(ax, building, alpha=0.8, color='blue')
+                    
+            elif idx == 1 and feature_data:
+                # Draw BMS features only
+                for feature in feature_data:
+                    create_building_3d(ax, feature, alpha=0.8, color='red')
+        else:
+            # Single view
+            if plot_option == "JSON_BondingBox" and building_data:
+                for building in building_data:
+                    create_building_3d(ax, building, alpha=0.8, color='blue')
+                    
+            elif plot_option == "BMS_Fitting" and feature_data:
+                for feature in feature_data:
+                    create_building_3d(ax, feature, alpha=0.8, color='red')
+        
+        # Add a scale indicator on the main axis
+        if idx == len(axes) - 1:  # Last axis
+            # Horizontal scale indicator
+            scale_length = 100  # 100 feet scale
+            scale_x = x_min + (x_max - x_min) * 0.1
+            scale_y = y_min + (y_max - y_min) * 0.1
+            
+            # Draw the scale bar
+            ax.plot([scale_y, scale_y], [scale_x, scale_x + scale_length], [0, 0], 'k-', linewidth=2)
+            
+            # Add text label
+            ax.text(scale_y, scale_x + scale_length/2, 5, f"{scale_length} feet", 
+                   ha='center', va='bottom', size=8, zdir=None,
+                   bbox=dict(facecolor='white', alpha=0.7, boxstyle='round,pad=0.2'))
+            
+            # Add a height indicator
+            height_x = x_min + (x_max - x_min) * 0.1
+            height_y = y_min + (y_max - y_min) * 0.9
+            height_z = 100  # 100 feet height indicator
+            
+            # Draw the height indicator
+            ax.plot([height_y, height_y], [height_x, height_x], [0, height_z], 'k-', linewidth=2)
+            
+            # Add text label
+            ax.text(height_y, height_x, height_z/2, f"{height_z} feet", 
+                   ha='left', va='center', size=8, zdir=None,
+                   bbox=dict(facecolor='white', alpha=0.7, boxstyle='round,pad=0.2'))
+    
+    # Adjust layout
+    fig.tight_layout()
     MatPlt.show()
+    
+    return axes
 
 
 def filter_structures(
@@ -606,11 +807,19 @@ def Decision_Algo(
 
 def Rotation_Definer(Angle, BMS_Length_idx):
     """Through the knowledge of the longest side of the model, assign fixed angle for rotation
-    Idx == 0 ( X is the longest)/ 1 (Y is the longest)"""
+    Idx == 0 (X is the longest)/ 1 (Y is the longest)
+    
+    For consistent rotation:
+    - GeoData buildings are rotated (rotation + 90) % 360 in visualization
+    - If LengthIdx is 1 (Y-aligned), add 90 degrees to align with X-axis
+    - If LengthIdx is 0 (X-aligned), keep the original angle
+    """
     if BMS_Length_idx == 1:
+        # Feature is Y-aligned (longer in Y-axis), add 90 degrees
         Angle_y_algned = (Angle + 90) % 360
         return Angle_y_algned
     elif BMS_Length_idx == 0:
+        # Feature is X-aligned (longer in X-axis), use original angle
         return Angle
 
 
@@ -695,12 +904,13 @@ def Save_random_features(
             feature_entries = sort_feature_entries(feature_entries, sort_option)
 
     # Write the formatted data to a file in the Falcon BMS format
-    write_to_file(
+    success, entries = write_to_file(
         output_file_path, BuildingGeneratorVer, [0, 0], num_features, feature_entries
     )
 
     # Update statistics with the new features
-    update_statistics(num_features, feature_types)
+    if success:
+        update_statistics(num_features, feature_types)
 
     return feature_entries
 
@@ -798,6 +1008,11 @@ def Save_accurate_features(
         # Extract model information
         model = Models.iloc[corrent_model_idx]
         ct_number, feature_name = model["CTNumber"], model["FeatureName"]
+        
+        # Apply Rotation_Definer to handle rotation based on LengthIdx
+        # - If LengthIdx=1 (Y-aligned), adds 90 degrees to align with X-axis
+        # - If LengthIdx=0 (X-aligned), keeps original angle
+        # This ensures consistent rotation between feature generation and visualization
         rotation = Rotation_Definer(
             Selected_GeoFeatures.iloc[select]["rotation"], model["LengthIdx"]
         )
@@ -838,12 +1053,13 @@ def Save_accurate_features(
         feature_entries = sort_feature_entries(feature_entries, sort_option)
 
     # Write features to file
-    write_to_file(
+    success, entries = write_to_file(
         SavePath, BuildingGeneratorVer, AOI_center, num_features, feature_entries
     )
 
-    # Update statistics
-    update_statistics(num_features, feature_types)
+    # Update statistics only if save was successful
+    if success:
+        update_statistics(num_features, feature_types)
 
     return feature_entries
 
@@ -860,21 +1076,30 @@ def get_value(Values_i, Values_f, model_type):
 
 
 # Function to write feature entries to a file
-def write_to_file(
-    SavePath, BuildingGeneratorVer, AOI_center, num_features, feature_entries
-):
-    with open(SavePath, "w") as output_file:
-        output_file.write(
-            f"# BMS-BuildingGenerator v{BuildingGeneratorVer} for FalconEditor - Objective Data\n\n"
+def write_to_file(SavePath, BuildingGeneratorVer, AOI_center, num_features, feature_entries):
+    """Write feature entries to a file with overwrite protection."""
+    def do_save(filepath):
+        with open(filepath, "w") as output_file:
+            output_file.write(
+                f"# BMS-BuildingGenerator v{BuildingGeneratorVer} for FalconEditor - Objective Data\n\n"
+            )
+            output_file.write(
+                "# Objective original location in Falcon World (Falcon BMS 4.38 with New Terrain)\n"
+            )
+            output_file.write(f"# ObjX: {AOI_center[0]} \n# ObjY: {AOI_center[1]}\n\n")
+            output_file.write("Version=6\n\n")
+            output_file.write(f"# FeatureEntries {num_features}\n\n")
+            output_file.write("\n".join(feature_entries))
+            output_file.write("\n\n# Point Headers 0\n")
+    
+    # Use FileManager to handle the save operation
+    success, final_path = FileManager.save_with_confirmation(None, SavePath, do_save)
+    if not success and final_path is None:
+        messagebox.showinfo(
+            "Operation Cancelled",
+            "The save operation was cancelled by the user. A temporary file has been saved in the generated_tmp folder."
         )
-        output_file.write(
-            "# Objective original location in Falcon World (Falcon BMS 4.38 with New Terrain)\n"
-        )
-        output_file.write(f"# ObjX: {AOI_center[0]} \n# ObjY: {AOI_center[1]}\n\n")
-        output_file.write("Version=6\n\n")
-        output_file.write(f"# FeatureEntries {num_features}\n\n")
-        output_file.write("\n".join(feature_entries))
-        output_file.write("\n\n# Point Headers 0\n")
+    return success, feature_entries
 
 
 # Function to format a feature entry string

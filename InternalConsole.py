@@ -8,7 +8,7 @@ class InternalConsole(tk.Toplevel):
         super().__init__()
         self_console.title("Internal Console")
         self_console.geometry("800x400")
-        icon_path = os.path.abspath("icon_128.ico")
+        icon_path = os.path.abspath("assets/icon_128.ico")
         self_console.iconbitmap(icon_path)
 
         # Create a Text widget for the internal console

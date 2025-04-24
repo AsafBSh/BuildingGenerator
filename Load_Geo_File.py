@@ -11,6 +11,12 @@ def get_field_value(row, field_names, special=None):
     if the field is not found, return False.
     find if the structure is detailed by checking the field value
     """
+    # List of values that are not considered special/detailed
+    non_special_values = [
+        " ", "", "roof", "no", "building", "yes", "0", "false", "true", 
+        "False", "True", "none", "None", 0, False, True, None
+    ]
+    
     for field in field_names:
         try:
             value = row[field]
@@ -19,14 +25,7 @@ def get_field_value(row, field_names, special=None):
                 value = value.lower()
                 # Check if special is a None, if not, check if the value is not in the list to determine if it is special
                 if special is not None:
-                    if special or value not in [
-                        " ",
-                        "roof",
-                        "no",
-                        "building",
-                        "yes",
-                        "0",
-                    ]:
+                    if special or value not in non_special_values:
                         return value, True
                     else:
                         return value, False
@@ -34,14 +33,9 @@ def get_field_value(row, field_names, special=None):
             elif value is not None and not m.isnan(value):
                 # Same check for non-string values (no lowercase conversion)
                 if special is not None:
-                    if special or str(value).lower() not in [
-                        " ",
-                        "roof",
-                        "no",
-                        "building",
-                        "yes",
-                        "0",
-                    ]:
+                    # Convert to string and check against non_special_values
+                    str_value = str(value).lower()
+                    if special or (str_value not in non_special_values and value not in non_special_values):
                         return value, True
                     else:
                         return value, False
@@ -128,8 +122,9 @@ def Load_Geo_File(
             print(f"Error processing row {index}: {e}")
             continue
         building, special = get_field_value(row, ["building"], special)
-        building_levels, special = get_field_value(row, ["building:levels"], special)
-        height, special = get_field_value(row, ["height"], special)
+        # Get building_levels and height without affecting the special flag
+        building_levels = get_field_value(row, ["building:levels"])
+        height = get_field_value(row, ["height"])
         aeroway, special = get_field_value(row, ["aeroway"], special)
         amenity, special = get_field_value(row, ["amenity"], special)
         barrier, special = get_field_value(row, ["barrier"], special)

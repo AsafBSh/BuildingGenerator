@@ -2,6 +2,7 @@ from tkinter import ttk, Canvas, Button, PhotoImage, messagebox
 import tkinter.filedialog
 import tkinter as tk
 import customtkinter as Ctk
+from PIL import Image
 
 # General libraries
 import os
@@ -13,6 +14,8 @@ import pandas as pd
 from pathlib import Path
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import traceback
+import math
 
 # functions from Code
 import OSMLegend
@@ -33,8 +36,7 @@ from MainCode import Show_Selected_Features_2D, Show_Selected_Features_3D
 
 class MainPage(tk.Tk):
     def __init__(self, *args, **kwargs):
-        # Initiate veriables
-        # self.ASSETS_PATH = Path(__file__).parent / Path(r"Assets")
+        # Initiate variables
         self.ASSETS_PATH = Path(r"Assets")
 
         tk.Tk.__init__(self, *args, **kwargs)
@@ -42,6 +44,11 @@ class MainPage(tk.Tk):
         self.geometry("1152x720")
         self.configure(bg="#FFFFFF")
         self.resizable(False, False)
+        
+        # Configure global ttk styles
+        style = ttk.Style()
+        style.configure("Treeview.Heading", font=('Arial', 10, 'bold'))
+        
         # Set Shared data vatiables
         self.shared_data = {
             "CTpath": tk.StringVar(),
@@ -80,7 +87,7 @@ class MainPage(tk.Tk):
             frame.grid(row=0, column=0, sticky="nsew")
 
         # Set Name and Icon
-        self.title("Building Generator v1.1")
+        self.title("Building Generator v1.2")
         self.iconbitmap("Assets/icon_128.ico")
 
         # Select Dash as main front page
@@ -133,16 +140,24 @@ class MainPage(tk.Tk):
                     self.frames["DatabasePage"].ModelsTable.delete(row)
 
     def SettingWindow(self):
-        Settings = Ctk.CTkToplevel(self)
+        Settings = tk.Toplevel(self)
         Settings.resizable(False, False)
         Settings.title("Settings")
+        Settings.geometry("400x150")
         self.disable_Settings_buttons()
 
+        # Create a frame for better organization
+        frame = tk.Frame(Settings, bg="#E7F3F7")
+        frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Create buttons row
+        button_frame = tk.Frame(frame, bg="#E7F3F7")
+        button_frame.pack(fill="x", pady=5)
+
         self.SaveSettings = Ctk.CTkButton(
-            Settings,
+            button_frame,
             text="Save Preset",
             fg_color="#A1B9D0",
-            bg_color="#A1B9D0",
             height=33,
             width=167,
             corner_radius=5,
@@ -150,13 +165,12 @@ class MainPage(tk.Tk):
             command=self.save_config_file,
             text_color="#000000",
         )
-        self.SaveSettings.grid(row=0, column=1, padx=10, pady=10)
+        self.SaveSettings.pack(side="left", padx=5)
 
         self.LoadSettings = Ctk.CTkButton(
-            Settings,
+            button_frame,
             text="Load Preset",
             fg_color="#A1B9D0",
-            bg_color="#A1B9D0",
             height=33,
             width=167,
             corner_radius=5,
@@ -164,10 +178,14 @@ class MainPage(tk.Tk):
             text_color="#000000",
             command=self.load_config,
         )
-        self.LoadSettings.grid(row=0, column=2, padx=10, pady=10)
+        self.LoadSettings.pack(side="left", padx=5)
+
+        # Create checkboxes row
+        checkbox_frame = tk.Frame(frame, bg="#E7F3F7")
+        checkbox_frame.pack(fill="x", pady=5)
 
         self.Auto_Load = Ctk.CTkCheckBox(
-            Settings,
+            checkbox_frame,
             checkbox_height=18,
             checkbox_width=18,
             text="Startup",
@@ -178,10 +196,10 @@ class MainPage(tk.Tk):
             command=self.startup_selection_checkbox,
             fg_color="#8DBBE7",
         )
-        self.Auto_Load.grid(row=0, column=0, padx=10, pady=10)
+        self.Auto_Load.pack(side="left", padx=5)
 
         self.debbuger = Ctk.CTkCheckBox(
-            Settings,
+            checkbox_frame,
             checkbox_height=18,
             checkbox_width=18,
             text="Debbuger",
@@ -192,13 +210,16 @@ class MainPage(tk.Tk):
             command=self.change_debugger_state,
             fg_color="#8DBBE7",
         )
-        self.debbuger.grid(row=1, column=0, padx=10, pady=10)
+        self.debbuger.pack(side="left", padx=5)
+
+        # Create console button row
+        console_frame = tk.Frame(frame, bg="#E7F3F7")
+        console_frame.pack(fill="x", pady=5)
 
         self.console_window = Ctk.CTkButton(
-            Settings,
+            console_frame,
             text="Open Console Window",
             fg_color="#A1B9D0",
-            bg_color="#A1B9D0",
             height=33,
             width=354,
             corner_radius=5,
@@ -206,7 +227,7 @@ class MainPage(tk.Tk):
             text_color="#000000",
             command=self.open_console_window,
         )
-        self.console_window.grid(row=1, column=1, columnspan=2, padx=10, pady=10)
+        self.console_window.pack(fill="x", padx=5)
 
         # Set Startup state based on the shared data value
         if self.shared_data["Startup"].get():
@@ -234,12 +255,57 @@ class MainPage(tk.Tk):
         """Change of checkbox in the settings window will set values to the shared value of startup
         It will load the config file, and change the value on the fly"""
 
-        # Load Config file
+        # Load or create Config file
         filename, filepath = "config.json", Path(r"config.json")
-        # filepath = Path(__file__).parent / Path(filename)
-        if os.path.isfile(filepath):
-            with open(filename, "r") as f:
-                loaded_data = json.load(f)
+        
+        # If config doesn't exist, save current settings first
+        if not os.path.isfile(filepath):
+            settings = {
+                "Startup": self.shared_data["Startup"].get(),
+                "CT_path": self.shared_data["CTpath"].get(),
+                "BMS_Database_Path": self.shared_data["BMS_Database_Path"].get(),
+                "Theater": self.shared_data["Theater"].get(),
+                "BMS_version": self.shared_data["BMS_version"].get(),
+                "Geopath": self.shared_data["Geopath"].get(),
+                "backup_CTpath": self.shared_data["backup_CTpath"].get(),
+                "EditorSavingPath": self.shared_data["EditorSavingPath"].get(),
+                "Database_Availability": self.shared_data["Database_Availability"].get(),
+                "projection_path": self.shared_data["projection_path"].get(),
+                "projection_string": self.shared_data["projection_string"].get(),
+                "restriction_box": self.frames["OperationPage"].restriction_box.get("0.0", "end"),
+                "textbox_Radius_random": self.frames["OperationPage"].textbox_Radius_random.get(),
+                "textbox_Amount_random": self.frames["OperationPage"].textbox_Amount_random.get(),
+                "textbox_Values_random1": self.frames["OperationPage"].textbox_Values_random1.get(),
+                "textbox_Values_random2": self.frames["OperationPage"].textbox_Values_random2.get(),
+                "switch_Presence_random": self.frames["OperationPage"].switch_Presence_random.get(),
+                "textbox_Presence_random1": self.frames["OperationPage"].textbox_Presence_random1.get(),
+                "textbox_Presence_random2": self.frames["OperationPage"].textbox_Presence_random2.get(),
+                "Fillter_optionmenu": self.frames["OperationPage"].Fillter_optionmenu.get(),
+                "values_geo_optionmenu": self.frames["OperationPage"].values_geo_optionmenu.get(),
+                "values_rand_optionmenu": self.frames["OperationPage"].values_rand_optionmenu.get(),
+                "Selection_optionmenu": self.frames["OperationPage"].Selection_optionmenu.get(),
+                "Auto_features_detector": self.frames["OperationPage"].Auto_features_detector.get(),
+                "textbox_Amount_geo": self.frames["OperationPage"].textbox_Amount_geo.get(),
+                "textbox_Values_geo1": self.frames["OperationPage"].textbox_Values_geo1.get(),
+                "textbox_Values_geo2": self.frames["OperationPage"].textbox_Values_geo2.get(),
+                "switch_Presence_geo": self.frames["OperationPage"].switch_Presence_geo.get(),
+                "textbox_Presence_geo1": self.frames["OperationPage"].textbox_Presence_geo1.get(),
+                "textbox_Presence_geo2": self.frames["OperationPage"].textbox_Presence_geo2.get(),
+                "segemented_button": self.frames["OperationPage"].segemented_button.get(),
+                "segemented_button_Saving": self.frames["OperationPage"].segemented_button_Saving.get(),
+                "segemented_button_graphing1": self.frames["OperationPage"].segemented_button_graphing1.get(),
+                "segemented_button_graphing2": self.frames["OperationPage"].segemented_button_graphing2.get(),
+                "Editor_Extraction_name": self.frames["OperationPage"].Editor_Extraction_name.get(),
+                "floor_deviation_entry": self.frames["OperationPage"].floor_deviation_entry.get(),
+                "textbox_floor_height": self.frames["GeoDataPage"].textbox_floor_height.get(),
+                "sorting_saving": self.frames["OperationPage"].sorting_saving.get(),
+            }
+            with open(filename, "w") as f:
+                json.dump(settings, f)
+
+        # Now load the config file
+        with open(filename, "r") as f:
+            loaded_data = json.load(f)
 
         # Set Startup state based on the shared data value
         if self.Auto_Load.get():
@@ -360,6 +426,15 @@ class MainPage(tk.Tk):
                     "Editor_Extraction_name": self.frames[
                         "OperationPage"
                     ].Editor_Extraction_name.get(),
+                    "floor_deviation_entry": self.frames[
+                        "OperationPage"
+                    ].floor_deviation_entry.get(),
+                    "textbox_floor_height": self.frames[
+                        "GeoDataPage"
+                    ].textbox_floor_height.get(),
+                    "sorting_saving": self.frames[
+                        "OperationPage"
+                    ].sorting_saving.get(),
                 }
 
                 with open(filepath, "w") as f:
@@ -420,6 +495,12 @@ class MainPage(tk.Tk):
             self.frames["OperationPage"].segemented_button_graphing2.set(
                 loaded_data["segemented_button_graphing2"]
             )
+            
+            # Set new fields if they exist in loaded data
+            if "sorting_saving" in loaded_data:
+                self.frames["OperationPage"].sorting_saving.set(
+                    loaded_data["sorting_saving"]
+                )
 
             # Force entries to diasable or enable
             self.frames["OperationPage"].value_State(
@@ -461,17 +542,30 @@ class MainPage(tk.Tk):
                 "textbox_Presence_random2",
                 "Editor_Extraction_name",
             ]
+            
+            # Add new text boxes
+            if "floor_deviation_entry" in loaded_data:
+                text_boxes.append("floor_deviation_entry")
+                
             for box in text_boxes:
                 if loaded_data and loaded_data[box] is not None:
                     self.frames["OperationPage"].__dict__[box].delete(0, tk.END)
                     self.frames["OperationPage"].__dict__[box].insert(
                         0, loaded_data[box]
                     )
+                    
+            # Handle floor height separately since it's in a different frame
+            if "textbox_floor_height" in loaded_data:
+                self.frames["GeoDataPage"].textbox_floor_height.delete(0, tk.END)
+                self.frames["GeoDataPage"].textbox_floor_height.insert(
+                    0, loaded_data["textbox_floor_height"]
+                )
+                
             self.frames["OperationPage"].restriction_box.delete("0.0", tk.END)
             self.frames["OperationPage"].restriction_box.insert(
                 tk.END, loaded_data["restriction_box"]
             )
-
+            
             # Will try to load Database through CT path that been inserted through the config file
             if loaded_data["CT_path"]:
                 ImagePath = self.frames["DatabasePage"].Check_Availability_Database()
@@ -579,9 +673,23 @@ class DashboardPage(tk.Frame):
         self.canvas.place(x=0, y=0)
         self.canvas.create_rectangle(0.0, 0.0, 204.0, 720.0, fill="#A0B9D0", outline="")
 
-        self.button_operations_img = PhotoImage(
-            file=str(self.controller.ASSETS_PATH / "button_operations.png")
+        # Load button images using CTkImage
+        self.button_operations_img = Ctk.CTkImage(
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_operations.png"))
         )
+        self.button_geo_img = Ctk.CTkImage(
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_geo.png"))
+        )
+        self.button_data_img = Ctk.CTkImage(
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_data.png"))
+        )
+        self.button_dash_img = Ctk.CTkImage(
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_dash.png"))
+        )
+        self.button_settings_img = Ctk.CTkImage(
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_options.png"))
+        )
+
         self.button_operations = Ctk.CTkButton(
             self,
             text="Operations",
@@ -597,10 +705,6 @@ class DashboardPage(tk.Frame):
             text_color="#000000",
         )
         self.button_operations.place(x=0, y=397)
-
-        self.button_geo_img = PhotoImage(
-            file=str(self.controller.ASSETS_PATH / "button_geo.png")
-        )
 
         self.button_geo = Ctk.CTkButton(
             self,
@@ -618,10 +722,6 @@ class DashboardPage(tk.Frame):
         )
         self.button_geo.place(x=0, y=349)
 
-        self.button_data_img = PhotoImage(
-            file=str(self.controller.ASSETS_PATH / "button_data.png")
-        )
-
         self.button_data = Ctk.CTkButton(
             self,
             text="Database",
@@ -638,9 +738,6 @@ class DashboardPage(tk.Frame):
         )
         self.button_data.place(x=0, y=297)
 
-        self.button_dash_img = PhotoImage(
-            file=str(self.controller.ASSETS_PATH / "button_dash.png")
-        )
         self.button_dash = Ctk.CTkButton(
             self,
             text="DashBoard",
@@ -656,9 +753,6 @@ class DashboardPage(tk.Frame):
         )
         self.button_dash.place(x=0, y=248)
 
-        self.button_settings_img = PhotoImage(
-            file=str(self.controller.ASSETS_PATH / "button_options.png")
-        )
         self.button_settings = Ctk.CTkButton(
             self,
             text="More\nSettings",
@@ -1156,6 +1250,78 @@ class DatabasePage(tk.Frame):
         self.Body_font_Bold = Ctk.CTkFont(family="Inter", size=15, weight="bold")
         self.button_font = Ctk.CTkFont(family="Inter", size=12)
         self.dash_font = Ctk.CTkFont(family="Inter", size=10)
+        
+        # Features dictionary mapping numeric type to descriptive names
+        self.FEATURES = {
+            "1": "Carter",
+            "2": "Control Tower",
+            "3": "Barn",
+            "4": "Bunker",
+            "5": "Blush",
+            "6": "Factories",
+            "7": "Church",
+            "8": "City Hall",
+            "9": "Dock",
+            "10": "Depot",
+            "11": "Runway",
+            "12": "Warehouse",
+            "13": "Helipad",
+            "14": "Fuel Tanks",
+            "15": "Nuclear Plant",
+            "16": "Bridges",
+            "17": "Pier",
+            "18": "Power Pole",
+            "19": "Shops",
+            "20": "Power Tower",
+            "21": "Apartment",
+            "22": "House",
+            "23": "Power Plant",
+            "24": "Taxi Signs",
+            "25": "Nav Beacon",
+            "26": "Radar Site",
+            "27": "Craters",
+            "28": "Radars",
+            "29": "R Tower",
+            "30": "Taxiway",
+            "31": "Rail Terminal",
+            "32": "Refinery",
+            "33": "SAM",
+            "34": "Shed",
+            "35": "Barracks",
+            "36": "Tree",
+            "37": "Water Tower",
+            "38": "Town Hall",
+            "39": "Air Terminal",
+            "40": "Shrine",
+            "41": "Park",
+            "42": "Off Block",
+            "43": "TV Station",
+            "44": "Hotel",
+            "45": "Hangar",
+            "46": "Lights",
+            "47": "VASI",
+            "48": "Storage Tank",
+            "49": "Fence",
+            "50": "Parking Lot",
+            "51": "Smoke Stack",
+            "52": "Building",
+            "53": "Cooling Tower",
+            "54": "Cont Dome",
+            "55": "Guard House",
+            "56": "Transformer",
+            "57": "Ammo Dump",
+            "58": "Art Site",
+            "59": "Office",
+            "60": "Chemical Plant",
+            "61": "Tower",
+            "62": "Hospital",
+            "63": "Shops/Blocks",
+            "64": "Static",
+            "65": "Runway Marker",
+            "66": "Stadium",
+            "67": "Monument",
+            "68": "Arrestor Cable",
+        }
 
         self.canvas = Canvas(
             self,
@@ -1170,9 +1336,23 @@ class DatabasePage(tk.Frame):
         self.canvas.place(x=0, y=0)
         self.canvas.create_rectangle(0.0, 0.0, 204.0, 720.0, fill="#A0B9D0", outline="")
 
-        self.button_operations_img = PhotoImage(
-            file=str(self.controller.ASSETS_PATH / "button_operations.png")
+        # Load button images using CTkImage
+        self.button_operations_img = Ctk.CTkImage(
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_operations.png"))
         )
+        self.button_geo_img = Ctk.CTkImage(
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_geo.png"))
+        )
+        self.button_data_img = Ctk.CTkImage(
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_data.png"))
+        )
+        self.button_dash_img = Ctk.CTkImage(
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_dash.png"))
+        )
+        self.button_settings_img = Ctk.CTkImage(
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_options.png"))
+        )
+
         self.button_operations = Ctk.CTkButton(
             self,
             text="Operations",
@@ -1188,10 +1368,6 @@ class DatabasePage(tk.Frame):
             text_color="#000000",
         )
         self.button_operations.place(x=0, y=397)
-
-        self.button_geo_img = PhotoImage(
-            file=str(self.controller.ASSETS_PATH / "button_geo.png")
-        )
 
         self.button_geo = Ctk.CTkButton(
             self,
@@ -1209,10 +1385,6 @@ class DatabasePage(tk.Frame):
         )
         self.button_geo.place(x=0, y=349)
 
-        self.button_data_img = PhotoImage(
-            file=str(self.controller.ASSETS_PATH / "button_data.png")
-        )
-
         self.button_data = Ctk.CTkButton(
             self,
             text="Database",
@@ -1228,9 +1400,6 @@ class DatabasePage(tk.Frame):
         )
         self.button_data.place(x=0, y=297)
 
-        self.button_dash_img = PhotoImage(
-            file=str(self.controller.ASSETS_PATH / "button_dash.png")
-        )
         self.button_dash = Ctk.CTkButton(
             self,
             text="DashBoard",
@@ -1248,9 +1417,6 @@ class DatabasePage(tk.Frame):
 
         self.button_dash.place(x=0, y=248)
 
-        self.button_settings_img = PhotoImage(
-            file=str(self.controller.ASSETS_PATH / "button_options.png")
-        )
         self.button_settings = Ctk.CTkButton(
             self,
             text="More\nSettings",
@@ -1339,12 +1505,11 @@ class DatabasePage(tk.Frame):
             "Type",
             "CTNumber",
             "EntityIdx",
+            "Height",
             "Width",
             "WidthOff",
             "Length",
             "LengthOff",
-            "Height",
-            "LengthIdx",
         ]
         self.ModelsTable = ttk.Treeview(
             ModelsTable_frame,
@@ -1368,16 +1533,26 @@ class DatabasePage(tk.Frame):
 
         for col in columns:
             self.ModelsTable.heading(col, text=col)
-            if col == "LengthIdx":
-                self.ModelsTable.column(col, width=30)
+            if col == "Type":
+                self.ModelsTable.column(col, width=85)
+            elif col == "Name":
+                self.ModelsTable.column(col, width=90)
+            elif col == "ModelNumber":
+                self.ModelsTable.column(col, width=45)
+            elif col == "CTNumber" or col == "EntityIdx":
+                self.ModelsTable.column(col, width=45)
+            elif col in ["Width", "Length", "Height"]:
+                self.ModelsTable.column(col, width=47)
+            elif col in ["WidthOff", "LengthOff"]:
+                self.ModelsTable.column(col, width=45)
             else:
-                self.ModelsTable.column(col, width=52)
+                self.ModelsTable.column(col, width=45)
 
             # Insert basic data
             self.ModelsTable.insert(
                 "",
                 "end",
-                values=["-", "-", "-", "-", "-", "-", "-", "-", "-", "-", "-"],
+                values=["-", "-", "-", "-", "-", "-", "-", "-", "-", "-"],
             )
 
         self.image_image_7 = PhotoImage(
@@ -1497,10 +1672,20 @@ class DatabasePage(tk.Frame):
             280.0,
             68.0,
             anchor="nw",
-            text="List of buildings and features in the selected Database",
+            text="Databse Features List",
             fill="#000000",
             font=("Inter", 15 * -1),
         )
+        
+        # Search functionality
+        search_frame = tk.Frame(self, bg="#FFFFFF")
+        search_frame.place(x=650, y=65)
+        
+        tk.Label(search_frame, text="Search:", bg="#FFFFFF").pack(side="left")
+        self.search_var = tk.StringVar()
+        search_entry = Ctk.CTkEntry(search_frame, textvariable=self.search_var, width=106, height=15)
+        search_entry.pack(side="left", padx=5)
+        search_entry.bind("<KeyRelease>", lambda e: self.search_models_table())
 
         self.image_image_9 = PhotoImage(
             file=str(self.controller.ASSETS_PATH / "image_Geo_data.png")
@@ -1557,19 +1742,47 @@ class DatabasePage(tk.Frame):
         self.BMSver_box.lift()
 
     def sort_column_models(self, tree, col, reverse=False):
-        """Sort the data in the given column."""
-        if col in ["ModelNumber", "Type", "CTNumber", "EntityIdx"]:
-            data = [(int(tree.set(item, col)), item) for item in tree.get_children("")]
-        elif col in ["Width", "WidthOff", "Length", "LengthOff", "Height", "LengthIdx"]:
-            data = [
-                (float(tree.set(item, col)), item) for item in tree.get_children("")
-            ]
+        """Sort the data in the given column based on appropriate data type.
+        
+        Args:
+            tree: The treeview widget
+            col: The column to sort
+            reverse: Whether to reverse the sort order
+        """
+        # Integer columns
+        if col in ["ModelNumber", "CTNumber", "EntityIdx"]:
+            data = []
+            for item in tree.get_children(""):
+                # Handle empty or invalid values
+                try:
+                    value = int(tree.set(item, col))
+                except ValueError:
+                    value = -1  # Default value for invalid entries
+                data.append((value, item))
+                
+        # Float columns (measurements)
+        elif col in ["Width", "WidthOff", "Length", "LengthOff", "Height"]:
+            data = []
+            for item in tree.get_children(""):
+                try:
+                    value = float(tree.set(item, col))
+                except ValueError:
+                    value = -1.0  # Default value for invalid entries
+                data.append((value, item))
+                
+        # String columns (Name, Type)
         else:
-            data = [(tree.set(item, col), item) for item in tree.get_children("")]
+            data = [(tree.set(item, col).lower(), item) for item in tree.get_children("")]
 
+        # Sort the data
         data.sort(reverse=reverse)
-        for index, (value, item) in enumerate(data):
-            tree.move(item, "", index)
+        
+        # Rearrange items in sorted positions
+        for idx, (_, item) in enumerate(data):
+            tree.move(item, "", idx)
+
+        # Reverse sort next time
+        tree.heading(col, command=lambda c=col: self.sort_column_models(tree, c, not reverse))
 
     def Check_Availability_Database(self):
         """the function will check if BMS_DB with correlated names (to the main CT path) is available,
@@ -1623,19 +1836,24 @@ class DatabasePage(tk.Frame):
             # round the decimal numbers to 3, for better veiwing the data on the dable
             for col in range(7, 12):
                 list_data[col] = round(list_data[col], 3)
-            # Exclude "Class" and "Domain" columns
+                
+            # Convert numeric Type to descriptive name
+            type_num = str(list_data[4])
+            type_name = self.FEATURES.get(type_num, f"Type {type_num}")
+            list_data[4] = type_name
+            
+            # Exclude "Class" and "Domain" columns and "LengthIdx"
             list_data = [
-                list_data[0],
-                list_data[1],
-                list_data[4],
-                list_data[5],
-                list_data[6],
-                list_data[7],
-                list_data[8],
-                list_data[9],
-                list_data[10],
-                list_data[11],
-                list_data[12],
+                list_data[0],  # ModelNumber
+                list_data[1],  # Name
+                list_data[4],  # Type (now descriptive)
+                list_data[5],  # CTNumber
+                list_data[6],  # EntityIdx
+                list_data[11],  # Height
+                list_data[7],  # Width
+                list_data[8],  # WidthOff
+                list_data[9], # Length
+                list_data[10], # LengthOff
             ]
             self.ModelsTable.insert("", "end", values=list_data)
 
@@ -1783,6 +2001,62 @@ class DatabasePage(tk.Frame):
         else:
             self.controller.shared_data["backup_CTpath"].set("No CT file selected")
 
+    def search_models_table(self):
+        """Search the database table for matching items"""
+        query = self.search_var.get()
+        
+        if not query:
+            # If search is empty, restore the original data
+            self.UdpateDB_Tables()
+            return
+            
+        # Convert query to lowercase for case-insensitive search
+        query = query.lower()
+        
+        # Get all items from the original data
+        original_data = self.controller.shared_data["BMS_Databse"]
+        
+        # Clear the current tree
+        for row in self.ModelsTable.get_children():
+            self.ModelsTable.delete(row)
+            
+        # Search through all items for matches in any column
+        for i in range(len(original_data)):
+            row_data = original_data.iloc[i]
+            # Convert all values to strings for searching
+            row_values = [str(val).lower() for val in row_data.values]
+            
+            # Check if the query is in any of the columns
+            if any(query in val for val in row_values):
+                # Format the data for display
+                list_data = list(row_data)
+                
+                # Round decimal values for better viewing
+                for col in range(7, 12):
+                    list_data[col] = round(list_data[col], 3)
+                    
+                # Format Type column
+                type_num = str(list_data[4])
+                type_name = self.FEATURES.get(type_num, f"Type {type_num}")
+                list_data[4] = type_name
+                
+                # Prepare the values to display (same order as in UdpateDB_Tables method)
+                display_values = [
+                    list_data[0],  # ModelNumber
+                    list_data[1],  # Name
+                    list_data[4],  # Type (now descriptive)
+                    list_data[5],  # CTNumber
+                    list_data[6],  # EntityIdx
+                    list_data[11], # Height
+                    list_data[7],  # Width
+                    list_data[8],  # WidthOff
+                    list_data[9],  # Length
+                    list_data[10], # LengthOff
+                ]
+                
+                # Insert the matching item
+                self.ModelsTable.insert("", "end", values=display_values)
+
 
 class GeoDataPage(tk.Frame):
     def __init__(self, parent, controller):
@@ -1807,9 +2081,23 @@ class GeoDataPage(tk.Frame):
         self.canvas.place(x=0, y=0)
         self.canvas.create_rectangle(0.0, 0.0, 204.0, 720.0, fill="#A0B9D0", outline="")
 
-        self.button_operations_img = PhotoImage(
-            file=str(self.controller.ASSETS_PATH / "button_operations.png")
+        # Load button images using CTkImage
+        self.button_operations_img = Ctk.CTkImage(
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_operations.png"))
         )
+        self.button_geo_img = Ctk.CTkImage(
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_geo.png"))
+        )
+        self.button_data_img = Ctk.CTkImage(
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_data.png"))
+        )
+        self.button_dash_img = Ctk.CTkImage(
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_dash.png"))
+        )
+        self.button_settings_img = Ctk.CTkImage(
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_options.png"))
+        )
+
         self.button_operations = Ctk.CTkButton(
             self,
             text="Operations",
@@ -1826,10 +2114,6 @@ class GeoDataPage(tk.Frame):
         )
         self.button_operations.place(x=0, y=397)
 
-        self.button_geo_img = PhotoImage(
-            file=str(self.controller.ASSETS_PATH / "button_geo.png")
-        )
-
         self.button_geo = Ctk.CTkButton(
             self,
             text="GeoData",
@@ -1844,10 +2128,6 @@ class GeoDataPage(tk.Frame):
             text_color="#000000",
         )
         self.button_geo.place(x=0, y=349)
-
-        self.button_data_img = PhotoImage(
-            file=str(self.controller.ASSETS_PATH / "button_data.png")
-        )
 
         self.button_data = Ctk.CTkButton(
             self,
@@ -1865,9 +2145,6 @@ class GeoDataPage(tk.Frame):
         )
         self.button_data.place(x=0, y=297)
 
-        self.button_dash_img = PhotoImage(
-            file=str(self.controller.ASSETS_PATH / "button_dash.png")
-        )
         self.button_dash = Ctk.CTkButton(
             self,
             text="DashBoard",
@@ -1884,9 +2161,143 @@ class GeoDataPage(tk.Frame):
         )
         self.button_dash.place(x=0, y=248)
 
-        self.button_settings_img = PhotoImage(
-            file=str(self.controller.ASSETS_PATH / "button_options.png")
+        self.button_settings = Ctk.CTkButton(
+            self,
+            text="More\nSettings",
+            fg_color="#778593",
+            bg_color="#A1B9D0",
+            image=self.button_settings_img,
+            height=97,
+            width=125,
+            corner_radius=20,
+            hover=False,
+            font=("Sans Font", 16),
+            text_color="#000000",
+            command=self.controller.SettingWindow,
         )
+        self.button_settings.place(x=14, y=581)
+
+        self.canvas.create_rectangle(
+            172.0, 0.0, 1152.0, 720.0, fill="#A1B9D0", outline=""
+        )
+
+        self.image_image_1 = PhotoImage(
+            file=str(self.controller.ASSETS_PATH / "image_BG.png")
+        )
+        self.canvas.create_image(659.0, 360.0, image=self.image_image_1)
+
+        self.image_image_2 = PhotoImage(
+            file=str(self.controller.ASSETS_PATH / "image_BG_mask.png")
+        )
+        self.canvas.create_image(659.0, 360.0, image=self.image_image_2)
+
+        self.image_image_3 = PhotoImage(
+            file=str(self.controller.ASSETS_PATH / "image_Name.png")
+        )
+        self.canvas.create_image(84.0, 116.0, image=self.image_image_3)
+
+        self.image_image_4 = PhotoImage(
+            file=str(self.controller.ASSETS_PATH / "image_Welcome.png")
+        )
+        self.canvas.create_image(84.0, 82.0, image=self.image_image_4)
+
+        self.image_image_5 = PhotoImage(
+            file=str(self.controller.ASSETS_PATH / "image_Logo.png")
+        )
+        self.canvas.create_image(89.0, 39.0, image=self.image_image_5)
+
+        self.image_image_6 = PhotoImage(
+            file=str(self.controller.ASSETS_PATH / "image_CT.png")
+        )
+        self.canvas.create_image(667.0, 631.0, image=self.image_image_6)
+
+        # Label/Button Widget for transparent  box
+        self.CTpath_box = tk.Label(
+            self, textvariable=self.controller.shared_data["CTpath"]
+        )
+        self.CTpath_box.place(x=375.0, y=612.0, width=730.0, height=30.0)
+        self.CTpath_box.bind(("<Button-1>"), self.controller.SelectCTfile)
+
+        # Load button images using CTkImage
+        self.button_operations_img = Ctk.CTkImage(
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_operations.png"))
+        )
+        self.button_geo_img = Ctk.CTkImage(
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_geo.png"))
+        )
+        self.button_data_img = Ctk.CTkImage(
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_data.png"))
+        )
+        self.button_dash_img = Ctk.CTkImage(
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_dash.png"))
+        )
+        self.button_settings_img = Ctk.CTkImage(
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_options.png"))
+        )
+
+        self.button_operations = Ctk.CTkButton(
+            self,
+            text="Operations",
+            fg_color="#A1B9D0",
+            bg_color="#A1B9D0",
+            image=self.button_operations_img,
+            height=33,
+            width=167,
+            command=lambda: controller.show_frame("OperationPage"),
+            corner_radius=0,
+            hover_color="#7A92A9",
+            font=("arial", 15),
+            text_color="#000000",
+        )
+        self.button_operations.place(x=0, y=397)
+
+        self.button_geo = Ctk.CTkButton(
+            self,
+            text="GeoData",
+            fg_color="#7A92A9",
+            bg_color="#7A92A9",
+            image=self.button_geo_img,
+            height=33,
+            width=167,
+            corner_radius=0,
+            hover=False,
+            font=("Sans Font", 15),
+            text_color="#000000",
+        )
+        self.button_geo.place(x=0, y=349)
+
+        self.button_data = Ctk.CTkButton(
+            self,
+            text="Database",
+            fg_color="#A1B9D0",
+            bg_color="#A1B9D0",
+            image=self.button_data_img,
+            height=33,
+            width=167,
+            command=lambda: controller.show_frame("DatabasePage"),
+            corner_radius=0,
+            hover_color="#7A92A9",
+            font=("arial", 15),
+            text_color="#000000",
+        )
+        self.button_data.place(x=0, y=297)
+
+        self.button_dash = Ctk.CTkButton(
+            self,
+            text="DashBoard",
+            fg_color="#A1B9D0",
+            bg_color="#A1B9D0",
+            image=self.button_dash_img,
+            height=33,
+            width=167,
+            hover_color="#7A92A9",
+            corner_radius=0,
+            font=("Sans Font", 15),
+            text_color="#000000",
+            command=lambda: controller.show_frame("DashboardPage"),
+        )
+        self.button_dash.place(x=0, y=248)
+
         self.button_settings = Ctk.CTkButton(
             self,
             text="More\nSettings",
@@ -2067,7 +2478,7 @@ class GeoDataPage(tk.Frame):
             280.0,
             68.0,
             anchor="nw",
-            text="List of features in the selected region",
+            text="GeographicalData Buildings list",
             fill="#000000",
             font=("Sans Font", 15 * -1),
         )
@@ -2218,19 +2629,44 @@ class GeoDataPage(tk.Frame):
         OSMLegend.OSMLegend()
 
     def sort_column_geo(self, tree, col, reverse=False):
-        """Sort the data in the given column."""
-        if col == "Index":
-            data = [(int(tree.set(item, col)), item) for item in tree.get_children("")]
-        elif col in ["Length", "Width", "Rotation", "Height"]:
-            data = [
-                (float(tree.set(item, col)), item) for item in tree.get_children("")
-            ]
+        """Sort the data in the given column based on appropriate data type.
+        
+        Args:
+            tree: The treeview widget
+            col: The column to sort
+            reverse: Whether to reverse the sort order
+        """
+        # Integer columns
+        if col in ["Index", "Levels", "Height"] or col in ["Length", "Width", "Rotation"]:
+            data = []
+            for item in tree.get_children(""):
+                try:
+                    value = float(tree.set(item, col))  # Using float to handle decimals
+                except ValueError:
+                    value = -1  # Default value for invalid entries
+                data.append((value, item))
+                
+        # String columns
+        elif col in ["Name", "Type", "Aeroway", "Amenity", "Barrier", "BMS", 
+                    "Bridge", "Building", "Diplomatic", "Leisure", "Man Made",
+                    "Military", "Office", "Power", "Religion", "Service", "Sport"]:
+            data = [(tree.set(item, col).lower(), item) for item in tree.get_children("")]
+            
+        # Special case for Center column which might have complex format
+        elif col == "Center":
+            data = [(tree.set(item, col), item) for item in tree.get_children("")]
         else:
             data = [(tree.set(item, col), item) for item in tree.get_children("")]
 
+        # Sort the data
         data.sort(reverse=reverse)
-        for index, (value, item) in enumerate(data):
-            tree.move(item, "", index)
+        
+        # Rearrange items in sorted positions
+        for idx, (_, item) in enumerate(data):
+            tree.move(item, "", idx)
+
+        # Reverse sort next time
+        tree.heading(col, command=lambda c=col: self.sort_column_geo(tree, c, not reverse))
 
     def is_floor_height_not_valid(self, textbox):
         content = textbox.get()
@@ -2308,25 +2744,58 @@ class GeoDataPage(tk.Frame):
         # Erase all data in the table
         for row in self.GeoTable.get_children():
             self.GeoTable.delete(row)
+            
         # Update Geo data table with collected data
         for i in range(len(GeoFeatures)):
             # round the decimal numbers to 3, for better veiwing the data on the dable
             data_list = list(GeoFeatures.iloc[i])
+            
+            # Clean the data list values - replace empty/false values with empty strings
+            data_list = self.clean_data_for_display(data_list)
+            
+            # Round numeric values for display
             data_list[2:5] = [
-                round(val, 3) for val in data_list[2:5]
+                round(val, 3) if isinstance(val, (int, float)) else val for val in data_list[2:5]
             ]  # Round length, width, rotation
+            
             try:
                 data_list[8] = round(
                     float(heights[0, i]), 3
                 )  # Replace initial height from the raw Geofile to the calculated height
             except:
-                data_list[9] = 0
+                data_list[9] = ""  # Use empty string instead of 0
+                
             self.GeoTable.insert("", "end", values=data_list)
 
         # Show message if succeeded
         return messagebox.showinfo(
             "Success", "The load of GeoData from GeoJson file has been succeeded"
         )
+        
+    def clean_data_for_display(self, data_list):
+        """Cleans data values for display in the GeoTable
+        Replaces empty/false/none values with empty strings"""
+        non_display_values = [
+            False, "False", None, "None", "none", "nan", "NaN", "false", "0", 
+            "no", "building", "yes", "True", "true", "", " ", "roof"
+        ]
+        
+        for i, val in enumerate(data_list):
+            # Handle NaN values
+            if isinstance(val, float) and math.isnan(val):
+                data_list[i] = ""
+            # Handle NumPy arrays
+            elif isinstance(val, np.ndarray):
+                # Convert NumPy array to string for display
+                data_list[i] = str(val) if val.size > 0 else ""
+            # Handle other types that could be in non_display_values
+            elif not isinstance(val, (list, dict, np.ndarray)) and (
+                val in non_display_values or 
+                (isinstance(val, str) and val.lower() in non_display_values)
+            ):
+                data_list[i] = ""
+                
+        return data_list
 
     def update_geo_data_GUI_fields(self, GeoFeatures, CalcData_GeoFeatures, AOI_center):
         """
@@ -2369,73 +2838,88 @@ class GeoDataPage(tk.Frame):
     def SelectGeoJsonFile(self, event):
         """Clicking on Geo box will open dialog which will allow to select"""
 
-        # open a file dialog and update the label text with the selected file path
-        file_path = tkinter.filedialog.askopenfilename(
-            filetypes=[("Geo-Json files", "*.GeoJson")]
-        )
-        if file_path:
-            # Show File at the text place on the GUI
-            self.controller.shared_data["Geopath"].set(file_path)
-
-        else:
-            self.controller.shared_data["Geopath"].set("No Projection file selected")
-            self.controller.shared_data["Geodata"].set(np.array([]))
+        try:
+            # open a file dialog and update the label text with the selected file path
+            file_path = tkinter.filedialog.askopenfilename(
+                filetypes=[("Geo-Json files", "*.GeoJson")]
+            )
+            if file_path:
+                # Show File at the text place on the GUI
+                self.controller.shared_data["Geopath"].set(file_path)
+            else:
+                # User canceled the dialog, just set the Geopath to default text
+                self.controller.shared_data["Geopath"].set("No GeoJSON file selected")
+        except Exception as e:
+            # Handle any potential errors during file selection
+            self.controller.shared_data["Geopath"].set("No GeoJSON file selected")
+            print(f"Error during file selection: {e}")
+            if hasattr(self.controller, "debugger") and self.controller.debugger:
+                traceback.print_exc()
 
     def SelectProjectionfile(self, event):
         """The function called by the projection TXT button, and looking for txt file which contain a string of projection
         self.controller.shared_data["projection_path"] = will have the path if file is selected
         self.controller.shared_data["projection_string"] = will have the string itself for projection"""
 
-        file_path = tkinter.filedialog.askopenfilename(
-            filetypes=[("Projection file", "*.txt")]
-        )
+        try:
+            file_path = tkinter.filedialog.askopenfilename(
+                filetypes=[("Projection file", "*.txt")]
+            )
 
-        # if path is valid
-        if file_path:
-            # Open the file in read mode
-            with open(file_path, "r") as file:
-                # Read all lines in the file
-                lines = file.readlines()
+            # if path is valid
+            if file_path:
+                # Open the file in read mode
+                with open(file_path, "r") as file:
+                    # Read all lines in the file
+                    lines = file.readlines()
 
-            # Initialize an empty dictionary to store the data
-            string = {}
+                # Initialize an empty dictionary to store the data
+                string = {}
 
-            # Loop through each line in the file
-            for line in lines:
-                # Split the line into key and value
-                try:
-                    key, value = line.strip().split("=", 1)
-                except:
+                # Loop through each line in the file
+                for line in lines:
+                    # Split the line into key and value
                     try:
-                        key, value = line.strip().split("=")
+                        key, value = line.strip().split("=", 1)
                     except:
-                        return messagebox.showerror("Error", "File cannot be read")
+                        try:
+                            key, value = line.strip().split("=")
+                        except:
+                            return messagebox.showerror("Error", "File cannot be read")
 
-                # Add the key-value pair to the dictionary
-                string[key] = value
+                    # Add the key-value pair to the dictionary
+                    string[key] = value
 
-            # Check if 'Projection string' is in the dictionary
-            if "Projection string" in string:
-                # Print the projection string
-                self.controller.shared_data["projection_string"].set(
-                    string["Projection string"]
-                )
-                self.controller.shared_data["projection_path"].set(file_path)
+                # Check if 'Projection string' is in the dictionary
+                if "Projection string" in string:
+                    # Print the projection string
+                    self.controller.shared_data["projection_string"].set(
+                        string["Projection string"]
+                    )
+                    self.controller.shared_data["projection_path"].set(file_path)
+                else:
+                    # Show an error message
+                    self.controller.shared_data["projection_path"].set(
+                        "No Projection file selected"
+                    )
+                    self.controller.shared_data["projection_string"].set("")
+                    return messagebox.showerror(
+                        "Error", "Projection string not found in the file"
+                    )
+            # Erase old values if dialog was canceled
             else:
-                # Show an error message
                 self.controller.shared_data["projection_path"].set(
                     "No Projection file selected"
                 )
                 self.controller.shared_data["projection_string"].set("")
-                return messagebox.showerror(
-                    "Error", "Projection string not found in the file"
-                )
-        # Erase old values
-        else:
-            self.controller.shared_data["projection_path"].set(
-                "No Projection file selected"
-            )
+        except Exception as e:
+            # Handle any potential errors during file selection
+            self.controller.shared_data["projection_path"].set("No Projection file selected")
             self.controller.shared_data["projection_string"].set("")
+            print(f"Error during projection file selection: {e}")
+            if hasattr(self.controller, "debugger") and self.controller.debugger:
+                traceback.print_exc()
+            return messagebox.showerror("Error", f"Error selecting projection file: {str(e)}")
 
 
 class OperationPage(tk.Frame):
@@ -2461,9 +2945,23 @@ class OperationPage(tk.Frame):
         self.canvas.place(x=0, y=0)
         self.canvas.create_rectangle(0.0, 0.0, 204.0, 720.0, fill="#A0B9D0", outline="")
 
-        self.button_operations_img = PhotoImage(
-            file=str(self.controller.ASSETS_PATH / "button_operations.png")
+        # Load button images using CTkImage
+        self.button_operations_img = Ctk.CTkImage(
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_operations.png"))
         )
+        self.button_geo_img = Ctk.CTkImage(
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_geo.png"))
+        )
+        self.button_data_img = Ctk.CTkImage(
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_data.png"))
+        )
+        self.button_dash_img = Ctk.CTkImage(
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_dash.png"))
+        )
+        self.button_settings_img = Ctk.CTkImage(
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_options.png"))
+        )
+
         self.button_operations = Ctk.CTkButton(
             self,
             text="Operations",
@@ -2478,10 +2976,6 @@ class OperationPage(tk.Frame):
             text_color="#000000",
         )
         self.button_operations.place(x=0, y=397)
-
-        self.button_geo_img = PhotoImage(
-            file=str(self.controller.ASSETS_PATH / "button_geo.png")
-        )
 
         self.button_geo = Ctk.CTkButton(
             self,
@@ -2499,10 +2993,6 @@ class OperationPage(tk.Frame):
         )
         self.button_geo.place(x=0, y=349)
 
-        self.button_data_img = PhotoImage(
-            file=str(self.controller.ASSETS_PATH / "button_data.png")
-        )
-
         self.button_data = Ctk.CTkButton(
             self,
             text="Database",
@@ -2519,9 +3009,6 @@ class OperationPage(tk.Frame):
         )
         self.button_data.place(x=0, y=297)
 
-        self.button_dash_img = PhotoImage(
-            file=str(self.controller.ASSETS_PATH / "button_dash.png")
-        )
         self.button_dash = Ctk.CTkButton(
             self,
             text="DashBoard",
@@ -2538,9 +3025,6 @@ class OperationPage(tk.Frame):
         )
         self.button_dash.place(x=0, y=248)
 
-        self.button_settings_img = PhotoImage(
-            file=str(self.controller.ASSETS_PATH / "button_options.png")
-        )
         self.button_settings = Ctk.CTkButton(
             self,
             text="More\nSettings",
@@ -2951,7 +3435,7 @@ class OperationPage(tk.Frame):
             884.0,
             381.0,
             anchor="nw",
-            text="Please state the values of the feature’s restriction \nyou are willing to integrate",
+            text="Please state the values of the feature's restriction \nyou are willing to integrate",
             fill="#565454",
             font=("Inter", 9 * -1),
         )
@@ -3890,14 +4374,15 @@ class OperationPage(tk.Frame):
                         # Update other dashboard elements as needed
                         self.controller.frames["DashboardPage"].update_pie_chart()
 
-                        # Without issues, success message will apear
-                        messagebox.showinfo(
-                            "Operation succeeded",
-                            f"Editor file with {num_features} Accurate feautures has been successfully "
-                            f"generated",
-                        )
-                        # Will generate graph of the BMSfeatures/GeoFeatures based on the segmented button in the GUI
-                        self.auto_graph_generating()
+                        # Only show success message if save was successful
+                        if self.BMS_features_map:
+                            messagebox.showinfo(
+                                "Operation succeeded",
+                                f"Editor file with {num_features} Accurate feautures has been successfully "
+                                f"generated",
+                            )
+                            # Will generate graph of the BMSfeatures/GeoFeatures based on the segmented button in the GUI
+                            self.auto_graph_generating()
 
                     elif saving_method == "BMS":
                         return messagebox.showinfo(
@@ -4001,14 +4486,16 @@ class OperationPage(tk.Frame):
                     # Update other dashboard elements as needed
                     self.controller.frames["DashboardPage"].update_pie_chart()
 
-                    messagebox.showinfo(
-                        "Operation succeeded",
-                        f"Editor file with {num_features} Random feautures has been successfully "
-                        f"generated",
-                    )
+                    # Only show success message if save was successful
+                    if self.BMS_features_map:
+                        messagebox.showinfo(
+                            "Operation succeeded",
+                            f"Editor file with {num_features} Random feautures has been successfully "
+                            f"generated",
+                        )
 
-                    # Will generate graph of the BMSfeatures/GeoFeatures based on the segmented button in the GUI
-                    self.auto_graph_generating()
+                        # Will generate graph of the BMSfeatures/GeoFeatures based on the segmented button in the GUI
+                        self.auto_graph_generating()
 
             elif saving_method == "BMS":
                 return messagebox.showinfo(
