@@ -13,6 +13,10 @@ from scipy.spatial.distance import cdist
 from collections import Counter
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from utils.file_manager import FileManager
+from utils.json_path_handler import load_json, save_json, JsonFiles
+import os
+import logging
+logger = logging.getLogger(__name__)
 
 
 # Load the data from the database
@@ -823,7 +827,23 @@ def Rotation_Definer(Angle, BMS_Length_idx):
         return Angle
 
 
-def Assign_features_randomly(num_features, radius, DB_path, DB_restrictions):
+def Assign_features_randomly(num_features, radius, DB_path, DB_restrictions, distribution_type):
+    """Assign features randomly with collision detection.
+    
+    This function assigns features randomly within a specified radius and tries
+    to avoid collisions between features by checking bounding boxes.
+    
+    Args:
+        num_features: Number of features to place
+        radius: Maximum radius from center (0,0) for placement
+        DB_path: Path to the database containing feature data
+        DB_restrictions: Restrictions for database query
+        distribution_type: Type of distribution to use
+        
+    Returns:
+        Tuple of (selected_data, x_coordinates, y_coordinates)
+    """
+    print(f"Using distribution type: {distribution_type}")
     # Load the database file containing the features data (mydatabase.db)
     AllBMSModels = Load_Db(DB_path, DB_restrictions)  # Options ModelNum, Name, Type
 
@@ -834,12 +854,331 @@ def Assign_features_randomly(num_features, radius, DB_path, DB_restrictions):
     # Randomly select features
     selected_indices = np.random.choice(len(AllBMSModels), num_features, replace=True)
     selected_data = AllBMSModels.iloc[selected_indices]
-
-    # Generate random coordinates within the specified radius
-    angles = np.random.uniform(0, 2 * np.pi, num_features)
-    distances = np.random.uniform(0, radius, num_features)
-    x_coordinates = distances * np.cos(angles)
-    y_coordinates = distances * np.sin(angles)
+    
+    # Initialize arrays for coordinates
+    x_coordinates = np.zeros(num_features)
+    y_coordinates = np.zeros(num_features)
+    
+    # Create a list to store occupied bounding boxes
+    # Each bounding box is represented as [x_min, y_min, x_max, y_max]
+    occupied_bounding_boxes = []
+    
+    # Get feature dimensions directly from the database
+    # No estimation or default values are used
+    def get_feature_dimensions(feature_row):
+        # Get actual Width and Length from the database
+        if 'Width' not in feature_row or 'Length' not in feature_row:
+            # If dimensions are missing, raise an error - no defaults
+            error_msg = f"Feature dimensions missing from database for feature {feature_row['FeatureName'] if 'FeatureName' in feature_row else 'unknown'}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+            
+        width = feature_row['Width']
+        length = feature_row['Length']
+        
+        # Log the actual dimensions
+        logger.debug(f"Actual dimensions for feature {feature_row['FeatureName'] if 'FeatureName' in feature_row else 'unknown'}: Width={width}, Length={length}")
+        
+        return width, length
+    
+    # Check for collision between a proposed bounding box and existing boxes
+    # Returns both a collision boolean and an overlap score (0 = no overlap, higher = more overlap)
+    def check_collision_with_score(new_box, existing_boxes):
+        # If no existing boxes, no collision
+        if not existing_boxes:
+            return False, 0.0
+        
+        # Unpack the coordinates for easier reading
+        new_min_x, new_min_y, new_max_x, new_max_y = new_box
+        
+        # Calculate area of new box
+        new_width = new_max_x - new_min_x
+        new_height = new_max_y - new_min_y
+        new_area = new_width * new_height
+        
+        # Ensure the box is valid (min < max)
+        if new_min_x >= new_max_x or new_min_y >= new_max_y:
+            logger.warning(f"Invalid bounding box detected: {new_box}. Treating as collision.")
+            return True, float('inf')  # Invalid box - treat as maximum collision
+        
+        # Variables to track total overlap
+        total_overlap_area = 0.0
+        max_overlap_ratio = 0.0  # Ratio of overlap compared to box size
+        has_collision = False
+        
+        # Check if the new box overlaps with any existing box
+        for idx, box in enumerate(existing_boxes):
+            # Validate the existing box
+            if len(box) != 4:
+                logger.warning(f"Invalid box format at index {idx}: {box}. Skipping.")
+                continue
+                
+            try:
+                ex_min_x, ex_min_y, ex_max_x, ex_max_y = box
+                
+                # Check for non-overlap first (AABB test)
+                if (new_min_x > ex_max_x or  # new is to the right of existing
+                    new_max_x < ex_min_x or  # new is to the left of existing
+                    new_min_y > ex_max_y or  # new is above existing
+                    new_max_y < ex_min_y):   # new is below existing
+                    # No overlap with this box
+                    continue
+                
+                # If we get here, there's an overlap - calculate its area
+                overlap_width = min(new_max_x, ex_max_x) - max(new_min_x, ex_min_x)
+                overlap_height = min(new_max_y, ex_max_y) - max(new_min_y, ex_min_y)
+                overlap_area = overlap_width * overlap_height
+                
+                # Skip if overlap is negligible (floating point error)
+                if overlap_area < 0.01:
+                    continue
+                    
+                # We have a real collision
+                has_collision = True
+                total_overlap_area += overlap_area
+                
+                # Calculate overlap ratio relative to new box area
+                overlap_ratio = overlap_area / new_area
+                max_overlap_ratio = max(max_overlap_ratio, overlap_ratio)
+                
+                # Early exit if we have a severe overlap (optimization)
+                if max_overlap_ratio > 0.5:
+                    return True, max_overlap_ratio
+                    
+            except Exception as e:
+                logger.error(f"Error in collision detection with box {box}: {e}")
+                # Be conservative - treat as collision if there's an error
+                return True, 1.0
+        
+        # Additionally, check proximity to other boxes (not just overlap)
+        # This helps maintain good spacing between features
+        for box in existing_boxes:
+            try:
+                ex_min_x, ex_min_y, ex_max_x, ex_max_y = box
+                
+                # Calculate center points
+                new_center_x = (new_min_x + new_max_x) / 2
+                new_center_y = (new_min_y + new_max_y) / 2
+                ex_center_x = (ex_min_x + ex_max_x) / 2
+                ex_center_y = (ex_min_y + ex_max_y) / 2
+                
+                # Distance between centers
+                center_distance = np.sqrt((new_center_x - ex_center_x)**2 + (new_center_y - ex_center_y)**2)
+                
+                # Minimum distance needed for no overlap
+                new_radius = max(new_width, new_height) / 2
+                ex_radius = max(ex_max_x - ex_min_x, ex_max_y - ex_min_y) / 2
+                min_distance = new_radius + ex_radius
+                
+                # If centers are too close (as a ratio of min_distance)
+                proximity_ratio = min_distance / max(center_distance, 0.001) - 1.0
+                if proximity_ratio > 0:
+                    # Add to the score based on proximity (closer = higher score)
+                    max_overlap_ratio = max(max_overlap_ratio, proximity_ratio * 0.5)
+                    
+                    # If very close, count as collision
+                    if proximity_ratio > 0.2:  # Within 20% of minimum distance
+                        has_collision = True
+            except Exception as e:
+                logger.warning(f"Error checking proximity: {e}")
+        
+        # Return final collision result and score
+        return has_collision, max_overlap_ratio
+        
+    # Legacy collision detection function for backward compatibility
+    def check_collision(new_box, existing_boxes):
+        collision, _ = check_collision_with_score(new_box, existing_boxes)
+        return collision
+    
+    # Place each feature with collision detection
+    for i in range(num_features):
+        feature = selected_data.iloc[i]
+        
+        # Get actual feature dimensions from the database
+        width, length = get_feature_dimensions(feature)
+        
+        # Calculate larger safety buffer based on feature size - larger features need more space
+        # Minimum 5 meter buffer, or 25% of the feature's largest dimension, whichever is greater
+        min_buffer = 5.0  # Minimum 5-meter buffer around each feature
+        size_based_buffer = max(width, length) * 0.25  # 25% of largest dimension
+        safety_buffer = max(min_buffer, size_based_buffer)
+        
+        # Apply buffer for collision detection purposes
+        placement_width = width + safety_buffer
+        placement_length = length + safety_buffer
+        
+        # Keep track of placement attempts
+        placed = False
+        attempts = 0
+        max_attempts = 50  # Increase max attempts for better chances of finding valid placement
+        
+        # Advanced tracking for best fallback position if all attempts fail
+        best_position = None
+        best_overlap_score = float('inf')  # Lower is better (less overlap)
+        
+        # For visualization in case of failure
+        all_attempted_positions = []
+        
+        # Placement strategies based on selected distribution type
+        while attempts < max_attempts and not placed:
+            # Generate coordinates based on distribution type
+            if distribution_type == "Normal Distribution":
+                # Normal Distribution - more features near the center
+                if attempts < 15:
+                    # Higher probability near center
+                    distance = radius * np.random.normal(0, 0.3)  # Mean 0, SD 0.3 * radius
+                    angle = np.random.uniform(0, 2 * np.pi)
+                    x = distance * np.cos(angle)
+                    y = distance * np.sin(angle)
+                elif attempts < 30:
+                    # Try with slightly wider distribution
+                    distance = radius * np.random.normal(0, 0.5)  # Mean 0, SD 0.5 * radius
+                    angle = np.random.uniform(0, 2 * np.pi)
+                    x = distance * np.cos(angle)
+                    y = distance * np.sin(angle)
+                else:
+                    # Fallback to spiral search from center
+                    t = (attempts - 30) / 20.0  # Parameter for spiral equation
+                    spiral_radius = t * radius * 0.9  # Gradually increases radius
+                    spiral_angle = t * 10 * np.pi  # Multiple rotations
+                    x = spiral_radius * np.cos(spiral_angle)
+                    y = spiral_radius * np.sin(spiral_angle)
+            
+            elif distribution_type == "Peripheral Distribution":
+                # Peripheral Distribution - more features toward the edges
+                if attempts < 15:
+                    # Higher probability near the edge
+                    # Use beta distribution skewed towards 1.0 (edge)
+                    distance_factor = np.random.beta(2, 1)  # Shape parameters favor values near 1.0
+                    distance = radius * (0.4 + 0.6 * distance_factor)  # At least 40% out from center
+                    angle = np.random.uniform(0, 2 * np.pi)
+                    x = distance * np.cos(angle)
+                    y = distance * np.sin(angle)
+                elif attempts < 30:
+                    # Try with ring pattern
+                    angle = np.random.uniform(0, 2 * np.pi)
+                    # Create a narrower ring near the edge
+                    ring_factor = np.random.uniform(0.7, 0.95)  # 70-95% of radius
+                    distance = radius * ring_factor
+                    x = distance * np.cos(angle)
+                    y = distance * np.sin(angle)
+                else:
+                    # Fallback to quadrant-based placement
+                    quadrant = attempts % 4  # 0: NE, 1: SE, 2: SW, 3: NW
+                    base_angle = (quadrant * np.pi/2) + np.random.uniform(-np.pi/4, np.pi/4)
+                    distance = radius * (0.7 + 0.3 * np.random.random())  # 70-100% of radius
+                    x = distance * np.cos(base_angle)
+                    y = distance * np.sin(base_angle)
+            
+            else:  # "Uniform Distribution"
+                # Uniform Distribution - equal probability across the entire area
+                if attempts < 15:
+                    # Pure uniform distribution
+                    distance = radius * np.sqrt(np.random.random())  # Square root for uniform density
+                    angle = np.random.uniform(0, 2 * np.pi)
+                    x = distance * np.cos(angle)
+                    y = distance * np.sin(angle)
+                elif attempts < 30:
+                    # Grid-based placement with jitter
+                    grid_cells = 6  # 6x6 grid
+                    grid_x = ((attempts - 15) % grid_cells) - (grid_cells/2 - 0.5)
+                    grid_y = ((attempts - 15) // grid_cells) - (grid_cells/2 - 0.5)
+                    # Normalize to radius and add jitter
+                    grid_scale = radius / (grid_cells/2)
+                    jitter = grid_scale * 0.3 * np.random.random()
+                    jitter_angle = np.random.uniform(0, 2 * np.pi)
+                    x = grid_x * grid_scale + jitter * np.cos(jitter_angle)
+                    y = grid_y * grid_scale + jitter * np.sin(jitter_angle)
+                else:
+                    # Fallback to systematic spiral coverage
+                    t = (attempts - 30) / 20.0  # Parameter for spiral equation
+                    # More even spiral with consistent spacing
+                    spiral_radius = radius * np.sqrt(t)  # Square root for uniform density
+                    spiral_angle = t * 15 * np.pi  # More rotations for better coverage
+                    x = spiral_radius * np.cos(spiral_angle)
+                    y = spiral_radius * np.sin(spiral_angle)
+            
+            # Store attempted position for visualization
+            all_attempted_positions.append((x, y))
+            
+            # Calculate bounding box with the feature at the center
+            half_width = placement_width / 2
+            half_length = placement_length / 2
+            new_box = [x - half_width, y - half_length, x + half_width, y + half_length]
+            
+            # Check for boundary constraint - keep fully within radius if possible
+            corner_distances = [
+                np.sqrt((x - half_width)**2 + (y - half_length)**2),  # bottom-left
+                np.sqrt((x - half_width)**2 + (y + half_length)**2),  # top-left
+                np.sqrt((x + half_width)**2 + (y - half_length)**2),  # bottom-right
+                np.sqrt((x + half_width)**2 + (y + half_length)**2)   # top-right
+            ]
+            max_corner_distance = max(corner_distances)
+            
+            # Only consider positions where feature is fully within radius
+            # But relax this constraint in later attempts
+            within_radius = max_corner_distance <= radius or attempts >= 30
+            
+            # Check if this position collides with existing features
+            collision, overlap_score = check_collision_with_score(new_box, occupied_bounding_boxes)
+            
+            # Track best position even if there's collision
+            # Lower overlap score is better (less overlap with existing features)
+            if within_radius and (best_position is None or overlap_score < best_overlap_score):
+                best_position = (x, y, new_box)
+                best_overlap_score = overlap_score
+            
+            if not collision and within_radius:
+                # Valid placement found - no collision and within radius
+                placed = True
+                x_coordinates[i] = x
+                y_coordinates[i] = y
+                
+                # Use the ACTUAL dimensions for the final bounding box (no safety buffer)
+                half_width = width / 2
+                half_length = length / 2
+                final_box = [x - half_width, y - half_length, x + half_width, y + half_length]
+                occupied_bounding_boxes.append(final_box)
+                
+                logger.debug(f"Feature {i} ({feature['FeatureName'] if 'FeatureName' in feature else 'unknown'}) placed at ({x:.2f}, {y:.2f}) without collision (attempt {attempts+1})")
+            else:
+                # Log collision details for debugging
+                if not within_radius:
+                    logger.debug(f"Feature {i} attempt {attempts+1}: outside radius boundary at ({x:.2f}, {y:.2f})")
+                if collision:
+                    logger.debug(f"Feature {i} attempt {attempts+1}: collision detected at ({x:.2f}, {y:.2f}) with score {overlap_score:.2f}")
+                
+                # Try again
+                attempts += 1
+        
+        # If all attempts failed, use the best position found with overlap warning
+        if not placed:
+            # We must have a best position by now unless something is wrong
+            if best_position is None:
+                # If somehow we don't have a best position, use a fallback at the origin with warning
+                logger.error(f"CRITICAL: Failed to find any valid position for feature {i} - using origin")
+                x, y = 0, 0
+                half_width = width / 2
+                half_length = length / 2
+                final_box = [x - half_width, y - half_length, x + half_width, y + half_length]
+            else:
+                # Use the best position we found (least overlap)
+                x, y, overlap_box = best_position
+                x_coordinates[i] = x
+                y_coordinates[i] = y
+                
+                # Use actual dimensions for the final bounding box (no safety buffer)
+                half_width = width / 2
+                half_length = length / 2
+                final_box = [x - half_width, y - half_length, x + half_width, y + half_length]
+            
+            # Record this box
+            occupied_bounding_boxes.append(final_box)
+            
+            # ALWAYS log warning for failed placements - this is critical!
+            failure_msg = f"WARNING: Feature {i} ({feature['FeatureName'] if 'FeatureName' in feature else 'unknown'}) placed with COLLISION at ({x:.2f}, {y:.2f}) after {attempts} failed attempts - overlap score: {best_overlap_score:.2f}"
+            print(failure_msg)  # Print to console
+            logger.warning(failure_msg)  # Log as warning
 
     return selected_data, x_coordinates, y_coordinates
 
@@ -858,8 +1197,12 @@ def Save_random_features(
     Values_i,
     sort_option,
     CT_Num=None,
-    Obj_Num=None,
+    Obj_Num=None
 ):
+    # Log only critical information
+    logger.info(f"Save_random_features: {SaveType} mode, {num_features} features")
+    if CT_Num is not None and Obj_Num is not None:
+        logger.info(f"BMS Injection: CT={CT_Num}, Obj={Obj_Num}")
     feature_entries = []
     feature_types = []
 
@@ -903,14 +1246,179 @@ def Save_random_features(
         if sort_option != "None":
             feature_entries = sort_feature_entries(feature_entries, sort_option)
 
-    # Write the formatted data to a file in the Falcon BMS format
-    success, entries = write_to_file(
-        output_file_path, BuildingGeneratorVer, [0, 0], num_features, feature_entries
-    )
+    # Check if we're using BMS injection mode
+    if SaveType == "BMS" and CT_Num is not None and Obj_Num is not None:
+        print("\n===== BMS INJECTION MODE DETECTED =====\n")
+        try:
+            print("DEBUG: Importing BMS injection modules")
+            from bms_injector import BmsInjector
+            from pathlib import Path
+            import tkinter as tk
+            from tkinter import messagebox
+            print("DEBUG: Successfully imported BMS injection modules")
+            
+            # Get BMS path from shared_data CTpath if available
+            print("DEBUG: Determining BMS path")
+            if 'shared_data' in globals() and 'CTpath' in shared_data and shared_data["CTpath"].get():
+                bms_path = os.path.dirname(shared_data["CTpath"].get())
+                print(f"DEBUG: Using path from shared_data: {bms_path}")
+            else:
+                # Fall back to SavePath parent directory
+                bms_path = Path(output_file_path).parent
+                print(f"DEBUG: Using fallback path from output_file_path: {bms_path}")
+            
+            # Create BMS injector instance
+            injector = BmsInjector(bms_path)
+            
+            # Check if CT is an objective
+            is_objective = injector.is_objective_ct(CT_Num)
+            objective_exists = injector.objective_exists(Obj_Num)
+            
+            proceed = True
+            
+            # Changed warnings to ask for confirmation instead of warning about CT not being an objective
+            if not is_objective and objective_exists:
+                proceed = messagebox.askyesno(
+                    "Confirmation",
+                    f"Are you sure you wish to create Objective overlapping CT Number {CT_Num} and Objective Number {Obj_Num}?"
+                )
+            elif not is_objective:
+                proceed = messagebox.askyesno(
+                    "Confirmation",
+                    f"Are you sure you wish to create Objective for CT Number {CT_Num} and Objective Number {Obj_Num}?"
+                )
+            elif objective_exists:
+                proceed = messagebox.askyesno(
+                    "Confirmation",
+                    f"Objective {Obj_Num} already exists. Do you want to override it?"
+                )
+            
+            if proceed:
+                # Try to load saved settings for this CT/Obj combination
+                try:
+                    from utils.json_path_handler import load_json, JsonFiles
+                    
+                    # Create a temporary root window for message boxes
+                    root = tk.Tk()
+                    root.withdraw()  # Hide the root window
+                    
+                    # Load saved objective settings
+                    saved_settings = load_json(JsonFiles.SAVED_OBJECTIVE_SETTINGS, default={})
+                    
+                    # Check if we have saved settings for this CT/Obj combination
+                    if saved_settings and saved_settings.get("ct_num") == CT_Num and saved_settings.get("obj_num") == Obj_Num:
+                        print(f"Found settings for CT:{CT_Num} Obj:{Obj_Num}")
+                        obj_type = saved_settings.get("type")
+                        name = saved_settings.get("name")
+                        reset_pd = saved_settings.get("reset_pd", True)
+                        fields = saved_settings.get("fields", {})
+                        
+                        # Convert field values to appropriate types
+                        typed_fields = {}
+                        for field_name, value in fields.items():
+                            try:
+                                if isinstance(value, str) and "." in value:
+                                    typed_fields[field_name] = float(value)
+                                elif isinstance(value, str) and value.isdigit():
+                                    typed_fields[field_name] = int(value)
+                                else:
+                                    typed_fields[field_name] = value
+                            except ValueError:
+                                typed_fields[field_name] = value
+                                
+                        fields = typed_fields
+                        print(f"Using saved settings: type={obj_type}, name={name}, reset_pd={reset_pd}")
+                    else:
+                        print(f"No matching previous settings found")
+                        logger.error(f"No saved settings found for CT:{CT_Num} Obj:{Obj_Num}")
+                        messagebox.showerror(
+                            "Missing Configuration",
+                            f"No saved settings found for CT:{CT_Num} and Objective:{Obj_Num}.\n\n"
+                            f"Please configure this objective first using the BMS Injection window."
+                        )
+                        root.destroy()
+                        return None
+                except Exception as e:
+                    error_msg = f"Error loading saved settings: {e}"
+                    print(error_msg)
+                    logger.error(error_msg)
+                    messagebox.showerror(
+                        "Error",
+                        f"Failed to load objective settings: {str(e)}\n\n"
+                        f"Please reconfigure this objective using the BMS Injection window."
+                    )
+                    root.destroy()
+                    return None
+                
+                # Clean up the root window
+                root.destroy()
+                        
+                # Update injector with new path if changed
+                if bms_path != str(injector.bms_path):
+                    injector = BmsInjector(bms_path)
+                
+                # Create objective and inject features in one operation
+                print("\n===== INJECTING FEATURES INTO BMS =====\n")
+                print(f"DEBUG: Calling create_and_inject_objective with {len(feature_entries)} features")
+                print(f"DEBUG: Obj_Num = {Obj_Num}, CT_Num = {CT_Num}, name = {name}, obj_type = {obj_type}")
+                print(f"DEBUG: Feature entries sample (first 3): {feature_entries[:3] if len(feature_entries) >= 3 else feature_entries}")
+                
+                try:
+                    injection_result = injector.create_and_inject_objective(Obj_Num, CT_Num, name, obj_type, feature_entries, selected_data, fields, reset_pd)
+                    print(f"DEBUG: Injection result: {injection_result}")
+                    
+                    if injection_result:
+                        # Success - just update statistics without showing a message
+                        # as the calling function will display a success message
+                        print("DEBUG: Injection successful, updating statistics")
+                        try:
+                            update_statistics(num_features, feature_types)
+                            print("DEBUG: Statistics updated successfully")
+                        except Exception as e:
+                            print(f"DEBUG: Error updating statistics: {e}")
+                    
+                        # Clean up temporary files after successful operation
+                        print("DEBUG: Cleaning up temporary files")
+                        try:
+                            injector.cleanup_temp_files(Obj_Num)
+                            print("DEBUG: Temporary files cleaned up")
+                        except Exception as e:
+                            print(f"DEBUG: Error cleaning up temporary files: {e}")
+                        
+                        # Don't create files in the Generated folder for successful BMS injections
+                        print("DEBUG: Returning feature entries, BMS injection completed successfully")
+                        return feature_entries
+                    else:
+                        print("DEBUG: Injection failed")
+                except Exception as e:
+                    print(f"DEBUG: Error during injection: {e}")
+                    import traceback
+                    print(f"DEBUG: Traceback: {traceback.format_exc()}")
+                    raise
+                else:
+                    messagebox.showerror(
+                        "Error",
+                        f"Failed to create objective {Obj_Num} or inject features."
+                    )
+            else:
+                # User decided not to proceed
+                return None
+        except Exception as e:
+            messagebox.showerror(
+                "Error",
+                f"Failed to initialize BMS injection: {str(e)}"
+            )
+            return None
+    else:
+        # Write features to file (original behavior) - only for Editor mode
+        if SaveType == "Editor":
+            success, entries = write_to_file(
+                output_file_path, BuildingGeneratorVer, [0, 0], num_features, feature_entries
+            )
 
-    # Update statistics with the new features
-    if success:
-        update_statistics(num_features, feature_types)
+            # Update statistics only if save was successful
+            if success:
+                update_statistics(num_features, feature_types)
 
     return feature_entries
 
@@ -1028,6 +1536,15 @@ def Save_accurate_features(
 
         # Get value and presence
         value = get_value(Values_i, Values_f, model["Type"])
+        
+        # Debug logging to help diagnose the value issue
+        if Values_f is None and Values_i is None:
+            logger.info(f"Using Map value for feature type {model['Type']}: {value}")
+        elif Values_i is not None:
+            logger.info(f"Using Random value between {Values_i} and {Values_f}: {value}")
+        else:
+            logger.info(f"Using Solid value {Values_f}: {value}")
+        
         presence = (
             np.random.uniform(Presence_i, Presence_f)
             if Presence_i is not None
@@ -1052,27 +1569,216 @@ def Save_accurate_features(
     if sort_option != "None":
         feature_entries = sort_feature_entries(feature_entries, sort_option)
 
-    # Write features to file
-    success, entries = write_to_file(
-        SavePath, BuildingGeneratorVer, AOI_center, num_features, feature_entries
-    )
-
-    # Update statistics only if save was successful
-    if success:
-        update_statistics(num_features, feature_types)
+    # Check if we're using BMS injection mode
+    if SaveType == "BMS" and CT_Num is not None and Obj_Num is not None:
+        try:
+            from bms_injector import BmsInjector
+            from pathlib import Path
+            import tkinter as tk
+            from tkinter import messagebox
+            
+            # Get BMS path from shared_data CTpath if available
+            if 'shared_data' in globals() and 'CTpath' in shared_data and shared_data["CTpath"].get():
+                bms_path = os.path.dirname(shared_data["CTpath"].get())
+            else:
+                # Fall back to SavePath parent directory
+                bms_path = Path(SavePath).parent
+            
+            # Create BMS injector instance
+            injector = BmsInjector(bms_path)
+            
+            # Check if CT is an objective
+            is_objective = injector.is_objective_ct(CT_Num)
+            objective_exists = injector.objective_exists(Obj_Num)
+            
+            proceed = True
+            
+            # Changed warnings to ask for confirmation instead of warning about CT not being an objective
+            if not is_objective and objective_exists:
+                proceed = messagebox.askyesno(
+                    "Confirmation",
+                    f"Are you sure you wish to create Objective overlapping CT Number {CT_Num} and Objective Number {Obj_Num}?"
+                )
+            elif not is_objective:
+                proceed = messagebox.askyesno(
+                    "Confirmation",
+                    f"Are you sure you wish to create Objective for CT Number {CT_Num} and Objective Number {Obj_Num}?"
+                )
+            elif objective_exists:
+                proceed = messagebox.askyesno(
+                    "Confirmation",
+                    f"Objective {Obj_Num} already exists. Do you want to override it?"
+                )
+            
+            if proceed:
+                # Try to load saved settings for this CT/Obj combination
+                try:
+                    from utils.json_path_handler import load_json, JsonFiles
+                    
+                    # Create a temporary root window for message boxes
+                    root = tk.Tk()
+                    root.withdraw()  # Hide the root window
+                    
+                    # Load saved objective settings
+                    saved_settings = load_json(JsonFiles.SAVED_OBJECTIVE_SETTINGS, default={})
+                    
+                    # Check if we have saved settings for this CT/Obj combination
+                    if saved_settings and saved_settings.get("ct_num") == CT_Num and saved_settings.get("obj_num") == Obj_Num:
+                        print(f"Found settings for CT:{CT_Num} Obj:{Obj_Num}")
+                        obj_type = saved_settings.get("type")
+                        name = saved_settings.get("name")
+                        reset_pd = saved_settings.get("reset_pd", True)
+                        fields = saved_settings.get("fields", {})
+                        
+                        # Convert field values to appropriate types
+                        typed_fields = {}
+                        for field_name, value in fields.items():
+                            try:
+                                if isinstance(value, str) and "." in value:
+                                    typed_fields[field_name] = float(value)
+                                elif isinstance(value, str) and value.isdigit():
+                                    typed_fields[field_name] = int(value)
+                                else:
+                                    typed_fields[field_name] = value
+                            except ValueError:
+                                typed_fields[field_name] = value
+                                
+                        fields = typed_fields
+                        print(f"Using saved settings: type={obj_type}, name={name}, reset_pd={reset_pd}")
+                    else:
+                        print(f"No matching previous settings found")
+                        logger.error(f"No saved settings found for CT:{CT_Num} Obj:{Obj_Num}")
+                        messagebox.showerror(
+                            "Missing Configuration",
+                            f"No saved settings found for CT:{CT_Num} and Objective:{Obj_Num}.\n\n"
+                            f"Please configure this objective first using the BMS Injection window."
+                        )
+                        root.destroy()
+                        return None
+                except Exception as e:
+                    error_msg = f"Error loading saved settings: {e}"
+                    print(error_msg)
+                    logger.error(error_msg)
+                    messagebox.showerror(
+                        "Error",
+                        f"Failed to load objective settings: {str(e)}\n\n"
+                        f"Please reconfigure this objective using the BMS Injection window."
+                    )
+                    root.destroy()
+                    return None
+                
+                # Clean up the root window
+                root.destroy()
+                        
+                # Update injector with new path if changed
+                if bms_path != str(injector.bms_path):
+                    injector = BmsInjector(bms_path)
+                
+                # Create objective and inject features in one operation
+                if injector.create_and_inject_objective(Obj_Num, CT_Num, name, obj_type, feature_entries, AllBMSModels, fields, reset_pd):
+                    # Success - just update statistics without showing a message
+                    # as the calling function will display a success message
+                    update_statistics(num_features, feature_types)
+                
+                    # Clean up temporary files after successful operation
+                    injector.cleanup_temp_files(Obj_Num)
+                    
+                    # Don't create files in the Generated folder for successful BMS injections
+                    return feature_entries
+                else:
+                    messagebox.showerror(
+                        "Error",
+                        f"Failed to create objective {Obj_Num} or inject features."
+                    )
+            else:
+                # User decided not to proceed
+                return None
+        except Exception as e:
+            messagebox.showerror(
+                "Error",
+                f"Failed to initialize BMS injection: {str(e)}"
+            )
+            return None
+    else:
+        # Write features to file only in Editor mode
+        if SaveType == "Editor":
+            success, entries = write_to_file(
+                SavePath, BuildingGeneratorVer, AOI_center, num_features, feature_entries
+            )
+            # Update statistics only if save was successful
+            if success:
+                update_statistics(num_features, feature_types)
 
     return feature_entries
+
+# Initialize cached values dictionary
+_cached_values_dict = None
+
+
+# Function to load values dictionary from a JSON file
+def load_values_dict():
+    # No defaults - if loading fails, it should raise an error
+    try:
+        values_dict = load_json(JsonFiles.VALUES_DICTIONARY, default=None)
+        if values_dict is None:
+            error_msg = "ValuesDictionary.json file not found or empty"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+        return values_dict
+    except Exception as e:
+        error_msg = f"Failed to load ValuesDictionary: {str(e)}"
+        logger.error(error_msg)
+        raise ValueError(error_msg)
 
 
 # Function to get a value based on input parameters and values dictionary
 def get_value(Values_i, Values_f, model_type):
     if Values_i is not None and Values_f is not None:
-        return np.random.uniform(Values_i, Values_f)
+        # Random value between min and max
+        try:
+            value = np.random.uniform(Values_i, Values_f)
+            return value
+        except Exception as e:
+            error_msg = f"Failed to generate random value between {Values_i} and {Values_f}: {str(e)}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
     elif Values_f is not None:
         return Values_f
     else:
-        values_dict = load_values_dict()
-        return values_dict.get(str(model_type), {"Value": 10})["Value"]
+        # Validation checks
+        if model_type is None:
+            error_msg = "Cannot look up value in ValuesDictionary: model_type is None"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+        # Only load values dictionary when actually needed
+        try:
+            values_dict = load_values_dict()
+        except Exception as e:
+            error_msg = f"Failed to load ValuesDictionary: {str(e)}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+            
+        # Make sure model_type is a string when looking up in the dictionary
+        model_type_str = str(model_type)
+        
+        # Look up the value based on model type and return it
+        type_entry = values_dict.get(model_type_str)
+        
+        # No defaults - if the model type isn't in the dictionary, it's an error
+        if not type_entry:
+            error_msg = f"No entry found in ValuesDictionary for model type {model_type}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+            
+        # Validate the entry has a Value field
+        if "Value" not in type_entry:
+            error_msg = f"ValuesDictionary entry for model type {model_type} is missing the 'Value' field"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+            
+        dict_value = type_entry["Value"]
+        logger.info(f"Using ValuesDictionary value {dict_value} for model type {model_type}")
+        return dict_value
 
 
 # Function to write feature entries to a file
@@ -1106,31 +1812,76 @@ def write_to_file(SavePath, BuildingGeneratorVer, AOI_center, num_features, feat
 def format_entry(
     ct_number, y_distance, x_distance, rotation, value, presence, select, feature_name
 ):
-    return (
-        f"FeatureEntry={ct_number} {y_distance:.4f} {x_distance:.4f} 0.0000 {rotation:.4f} "
-        f"{int(value):04d} 0000 -1 {int(presence)}# {select}) {feature_name}"
-    )
+    # Validate all required inputs are provided
+    if ct_number is None:
+        error_msg = "CT number cannot be None"
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+        
+    if value is None:
+        error_msg = f"Feature value cannot be None for CT {ct_number} ({feature_name})"
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+        
+    if presence is None:
+        error_msg = f"Feature presence cannot be None for CT {ct_number} ({feature_name})"
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+        
+    if feature_name is None:
+        error_msg = f"Feature name cannot be None for CT {ct_number}"
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+    
+    # Format the value as a 4-digit integer
+    try:
+        # Convert value to integer and format to 4 digits with leading zeros
+        value_int = int(value)  # Ensure value is an integer
+        formatted_value = f"{value_int:04d}"
+        
+        # Show the value transformation for debugging
+        print(f"DEBUG: Feature CT {ct_number} ({feature_name}) - value {value} formatted to '{formatted_value}'")
+        logger.info(f"Feature value for CT {ct_number} ({feature_name}): {value} -> {formatted_value}")
+    except (ValueError, TypeError) as e:
+        # No defaults - if we can't format the value, it's an error
+        error_msg = f"Error formatting value '{value}' for feature {feature_name}: {e}"
+        print(f"ERROR: {error_msg}")
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+    
+    # Format presence as integer
+    try:
+        presence_int = int(presence)
+    except (ValueError, TypeError) as e:
+        error_msg = f"Error converting presence '{presence}' to integer for CT {ct_number}: {e}"
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+    
+    # Format the feature entry string
+    try:
+        return (
+            f"FeatureEntry={ct_number} {y_distance:.4f} {x_distance:.4f} 0.0000 {rotation:.4f} "
+            f"{formatted_value} 0000 -1 {presence_int}# {select}) {feature_name}"
+        )
+    except Exception as e:
+        error_msg = f"Error creating feature entry for CT {ct_number}: {e}"
+        logger.error(error_msg)
+        raise ValueError(error_msg)
 
 
 # Function to load values dictionary from a JSON file
 def load_values_dict():
-    filepath = Path(r"ValuesDic.json")
     try:
-        with open(filepath, "r") as f:
-            values_dict = json.load(f)
-        if not values_dict:
-            messagebox.showerror(
-                "Error",
-                "The values dictionary is empty. The procedure will continue with Value == 10.",
-            )
-            return {"default": {"Value": 10}}
-    except Exception:
-        messagebox.showerror(
-            "Error",
-            "The values dictionary is not found. The procedure will continue with Value == 10.",
-        )
-        return {"default": {"Value": 10}}
-    return values_dict
+        values_dict = load_json(JsonFiles.VALUES_DICTIONARY, default=None)
+        if values_dict is None:
+            error_msg = "ValuesDictionary.json file not found or empty"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+        return values_dict
+    except Exception as e:
+        error_msg = f"Failed to load ValuesDictionary: {str(e)}"
+        logger.error(error_msg)
+        raise ValueError(error_msg)
 
 
 def sort_feature_entries(feature_entries, sort_option):
@@ -1200,8 +1951,16 @@ def save_statistics(stats):
         for k, v in stats.items()
     }
 
-    with gzip.open("feature_statistics.json.gz", "wt") as f:
-        json.dump(stats, f, default=default)
+    # Pre-convert the data to a JSON-compatible format
+    try:
+        # First convert using json.dumps with the custom default function
+        # Then parse it back to a Python object that save_json can handle
+        json_compatible_stats = json.loads(json.dumps(stats, default=default))
+        # Now save using save_json without the default parameter
+        save_json(JsonFiles.FEATURE_STATISTICS, json_compatible_stats)
+    except Exception as e:
+        print(f"Error saving statistics: {e}")
+        logger.error(f"Error saving statistics: {e}")
 
 
 def update_statistics(num_features, feature_types):
@@ -1230,16 +1989,31 @@ def update_statistics(num_features, feature_types):
 def load_statistics():
     # Function to load statistics from a gzipped JSON file
     try:
-        with gzip.open("feature_statistics.json.gz", "rt") as f:
-            stats = json.load(f)
-
-        # Ensure feature_types is a Counter with integer values
-        stats["feature_types"] = Counter(
-            {str(k): int(v) for k, v in stats["feature_types"].items()}
-        )
-
-        return stats
-    except (FileNotFoundError, json.JSONDecodeError):
+        stats = load_json(JsonFiles.FEATURE_STATISTICS, default=None)
+        
+        if stats:
+            logger.info(f"Loaded feature statistics from {JsonFiles.FEATURE_STATISTICS}")
+            
+            # Ensure all required keys exist and have the correct types
+            if "total_features" not in stats:
+                stats["total_features"] = 0
+            if "total_usage" not in stats:
+                stats["total_usage"] = 0
+            if "feature_types" not in stats:
+                stats["feature_types"] = Counter()
+            elif not isinstance(stats["feature_types"], Counter):
+                stats["feature_types"] = Counter(stats["feature_types"])
+                
+            return stats
+        else:
+            # If no stats were loaded, create a new stats dictionary
+            logger.info("No feature statistics found, creating new default statistics")
+            return {"total_features": 0, "total_usage": 0, "feature_types": Counter()}
+    except Exception as e:
+        logger.error(f"Error loading feature statistics: {e}")
+        if logger.isEnabledFor(logging.DEBUG):
+            import traceback
+            logger.debug(traceback.format_exc())
         return {"total_features": 0, "total_usage": 0, "feature_types": Counter()}
 
 

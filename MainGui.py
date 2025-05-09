@@ -16,6 +16,8 @@ from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import traceback
 import math
+import logging
+from utils.json_path_handler import load_json, save_json, JsonFiles, get_json_path
 
 # functions from Code
 import OSMLegend
@@ -330,179 +332,128 @@ class MainPage(tk.Tk):
             self.frames[Page].button_settings.configure(state="disabled")
 
     def save_config_file(self):
-        """Check if Configuration file is exists, and Save it when "save" button is clicked"""
-        filepath = Path(r"config.json")
-        # filepath = Path(__file__).parent / Path(filename)
-        if os.path.isfile(filepath):
-            result = messagebox.askyesno(
-                "Override",
-                "Configuration file is already existing\nDo you want to override it?",
+        """Check if Configuration file exists, and Save it when "save" button is clicked"""
+        try:
+            # Prepare settings dictionary with all current values
+            settings = {
+                "Startup": self.shared_data["Startup"].get(),
+                "CT_path": self.shared_data["CTpath"].get(),
+                "BMS_Database_Path": self.shared_data["BMS_Database_Path"].get(),
+                "Theater": self.shared_data["Theater"].get(),
+                "BMS_version": self.shared_data["BMS_version"].get(),
+                "Geopath": self.shared_data["Geopath"].get(),
+                "backup_CTpath": self.shared_data["backup_CTpath"].get(),
+                "EditorSavingPath": self.shared_data["EditorSavingPath"].get(),
+                "Database_Availability": self.shared_data["Database_Availability"].get(),
+                "projection_path": self.shared_data["projection_path"].get(),
+                "projection_string": self.shared_data["projection_string"].get(),
+                "restriction_box": self.frames["OperationPage"].restriction_box.get("0.0", "end"),
+                "textbox_Radius_random": self.frames["OperationPage"].textbox_Radius_random.get(),
+                "textbox_Amount_random": self.frames["OperationPage"].textbox_Amount_random.get(),
+                "textbox_Values_random1": self.frames["OperationPage"].textbox_Values_random1.get(),
+                "textbox_Values_random2": self.frames["OperationPage"].textbox_Values_random2.get(),
+                "switch_Presence_random": self.frames["OperationPage"].switch_Presence_random.get(),
+                "textbox_Presence_random1": self.frames["OperationPage"].textbox_Presence_random1.get(),
+                "textbox_Presence_random2": self.frames["OperationPage"].textbox_Presence_random2.get(),
+                "Fillter_optionmenu": self.frames["OperationPage"].Fillter_optionmenu.get(),
+                "values_geo_optionmenu": self.frames["OperationPage"].values_geo_optionmenu.get(),
+                "values_rand_optionmenu": self.frames["OperationPage"].values_rand_optionmenu.get(),
+                "Selection_optionmenu": self.frames["OperationPage"].Selection_optionmenu.get(),
+                "Auto_features_detector": self.frames["OperationPage"].Auto_features_detector.get(),
+                "textbox_Amount_geo": self.frames["OperationPage"].textbox_Amount_geo.get(),
+                "textbox_Values_geo1": self.frames["OperationPage"].textbox_Values_geo1.get(),
+                "textbox_Values_geo2": self.frames["OperationPage"].textbox_Values_geo2.get(),
+                "switch_Presence_geo": self.frames["OperationPage"].switch_Presence_geo.get(),
+                "textbox_Presence_geo1": self.frames["OperationPage"].textbox_Presence_geo1.get(),
+                "textbox_Presence_geo2": self.frames["OperationPage"].textbox_Presence_geo2.get(),
+                "segemented_button": self.frames["OperationPage"].segemented_button.get(),
+                "segemented_button_Saving": self.frames["OperationPage"].segemented_button_Saving.get(),
+                "segemented_button_graphing1": self.frames["OperationPage"].segemented_button_graphing1.get(),
+                "segemented_button_graphing2": self.frames["OperationPage"].segemented_button_graphing2.get(),
+                "Editor_Extraction_name": self.frames["OperationPage"].Editor_Extraction_name.get(),
+                "floor_deviation_entry": self.frames["OperationPage"].floor_deviation_entry.get(),
+                "textbox_floor_height": self.frames["GeoDataPage"].textbox_floor_height.get(),
+                "sorting_saving": self.frames["OperationPage"].sorting_saving.get(),
+                "distribution_selection": self.frames["OperationPage"].distribution_selection.get(),
+            }
+            
+            # Check if configuration file already exists in data_components folder
+            try:
+                existing_config = load_json(JsonFiles.CONFIG_JSON, default=None)
+                if existing_config:
+                    result = messagebox.askyesno(
+                        "Override",
+                        "Configuration file already exists in \nDo you want to override it?",
+                    )
+                    if not result:
+                        return messagebox.showinfo("Saving Aborted", "The saving process has been cancelled by user")
+            except Exception:
+                # If there's an error checking for the file, assume it doesn't exist
+                pass
+                
+            # Save the configuration to data_components folder
+            save_json(JsonFiles.CONFIG_JSON, settings)
+            
+            # Show success message
+            return messagebox.showinfo(
+                "Saving succeeded",
+                "The configuration has been saved to data_components folder successfully"
             )
-
-            if result:
-                settings = {
-                    "Startup": self.shared_data["Startup"].get(),
-                    "CT_path": self.shared_data["CTpath"].get(),
-                    "BMS_Database_Path": self.shared_data["BMS_Database_Path"].get(),
-                    "Theater": self.shared_data["Theater"].get(),
-                    "BMS_version": self.shared_data["BMS_version"].get(),
-                    "Geopath": self.shared_data["Geopath"].get(),
-                    "backup_CTpath": self.shared_data["backup_CTpath"].get(),
-                    "EditorSavingPath": self.shared_data["EditorSavingPath"].get(),
-                    "Database_Availability": self.shared_data[
-                        "Database_Availability"
-                    ].get(),
-                    "projection_path": self.shared_data["projection_path"].get(),
-                    "projection_string": self.shared_data["projection_string"].get(),
-                    "restriction_box": self.frames["OperationPage"].restriction_box.get(
-                        "0.0", "end"
-                    ),
-                    "textbox_Radius_random": self.frames[
-                        "OperationPage"
-                    ].textbox_Radius_random.get(),
-                    "textbox_Amount_random": self.frames[
-                        "OperationPage"
-                    ].textbox_Amount_random.get(),
-                    "textbox_Values_random1": self.frames[
-                        "OperationPage"
-                    ].textbox_Values_random1.get(),
-                    "textbox_Values_random2": self.frames[
-                        "OperationPage"
-                    ].textbox_Values_random2.get(),
-                    "switch_Presence_random": self.frames[
-                        "OperationPage"
-                    ].switch_Presence_random.get(),
-                    "textbox_Presence_random1": self.frames[
-                        "OperationPage"
-                    ].textbox_Presence_random1.get(),
-                    "textbox_Presence_random2": self.frames[
-                        "OperationPage"
-                    ].textbox_Presence_random2.get(),
-                    "Fillter_optionmenu": self.frames[
-                        "OperationPage"
-                    ].Fillter_optionmenu.get(),
-                    "values_geo_optionmenu": self.frames[
-                        "OperationPage"
-                    ].values_geo_optionmenu.get(),
-                    "values_rand_optionmenu": self.frames[
-                        "OperationPage"
-                    ].values_rand_optionmenu.get(),
-                    "Selection_optionmenu": self.frames[
-                        "OperationPage"
-                    ].Selection_optionmenu.get(),
-                    "Auto_features_detector": self.frames[
-                        "OperationPage"
-                    ].Auto_features_detector.get(),
-                    "textbox_Amount_geo": self.frames[
-                        "OperationPage"
-                    ].textbox_Amount_geo.get(),
-                    "textbox_Values_geo1": self.frames[
-                        "OperationPage"
-                    ].textbox_Values_geo1.get(),
-                    "textbox_Values_geo2": self.frames[
-                        "OperationPage"
-                    ].textbox_Values_geo2.get(),
-                    "switch_Presence_geo": self.frames[
-                        "OperationPage"
-                    ].switch_Presence_geo.get(),
-                    "textbox_Presence_geo1": self.frames[
-                        "OperationPage"
-                    ].textbox_Presence_geo1.get(),
-                    "textbox_Presence_geo2": self.frames[
-                        "OperationPage"
-                    ].textbox_Presence_geo2.get(),
-                    "segemented_button": self.frames[
-                        "OperationPage"
-                    ].segemented_button.get(),
-                    "segemented_button_Saving": self.frames[
-                        "OperationPage"
-                    ].segemented_button_Saving.get(),
-                    "segemented_button_graphing1": self.frames[
-                        "OperationPage"
-                    ].segemented_button_graphing1.get(),
-                    "segemented_button_graphing2": self.frames[
-                        "OperationPage"
-                    ].segemented_button_graphing2.get(),
-                    "Editor_Extraction_name": self.frames[
-                        "OperationPage"
-                    ].Editor_Extraction_name.get(),
-                    "floor_deviation_entry": self.frames[
-                        "OperationPage"
-                    ].floor_deviation_entry.get(),
-                    "textbox_floor_height": self.frames[
-                        "GeoDataPage"
-                    ].textbox_floor_height.get(),
-                    "sorting_saving": self.frames[
-                        "OperationPage"
-                    ].sorting_saving.get(),
-                }
-
-                with open(filepath, "w") as f:
-                    json.dump(settings, f)
-
-                return messagebox.showinfo(
-                    "Saving succeeded",
-                    "The Saving process has been finished successfully",
-                )
-
-            else:
-                return messagebox.showwarning(
+            
+        except Exception as e:
+            # Show error message if any exception occurs during saving
+            logging.error(f"Error saving configuration: {str(e)}")
+            return messagebox.showerror(
                     "Saving Aborted", "The Saving process has been aborted"
                 )
 
-    def load_config(self):
-        """Check if Configuration file is exists, and load it when "load" button is clicked"""
-        filepath = Path(r"config.json")
-        # filepath = Path(__file__).parent / Path(filename)
-        if os.path.isfile(filepath):
-            with open(filepath, "r") as f:
-                loaded_data = json.load(f)
-
-            self.shared_data["Startup"].set(loaded_data["Startup"])
-            self.shared_data["CTpath"].set(loaded_data["CT_path"])
-            self.shared_data["BMS_Database_Path"].set(loaded_data["BMS_Database_Path"])
-            self.shared_data["Theater"].set(loaded_data["Theater"])
-            self.shared_data["BMS_version"].set(loaded_data["BMS_version"])
-            self.shared_data["Geopath"].set(loaded_data["Geopath"])
-            self.shared_data["backup_CTpath"].set(loaded_data["backup_CTpath"])
-            self.shared_data["EditorSavingPath"].set(loaded_data["EditorSavingPath"])
-            self.shared_data["Database_Availability"].set(
-                loaded_data["Database_Availability"]
-            )
-            self.shared_data["projection_path"].set(loaded_data["projection_path"])
-            self.shared_data["projection_string"].set(loaded_data["projection_string"])
-            self.frames["OperationPage"].Fillter_optionmenu.set(
-                loaded_data["Fillter_optionmenu"]
-            )
-            self.frames["OperationPage"].values_geo_optionmenu.set(
-                loaded_data["values_geo_optionmenu"]
-            )
-            self.frames["OperationPage"].values_rand_optionmenu.set(
-                loaded_data["values_rand_optionmenu"]
-            )
-            self.frames["OperationPage"].Selection_optionmenu.set(
-                loaded_data["Selection_optionmenu"]
-            )
-            self.frames["OperationPage"].segemented_button.set(
-                loaded_data["segemented_button"]
-            )
-            self.frames["OperationPage"].segemented_button_Saving.set(
-                loaded_data["segemented_button_Saving"]
-            )
-            self.frames["OperationPage"].segemented_button_graphing1.set(
-                loaded_data["segemented_button_graphing1"]
-            )
-            self.frames["OperationPage"].segemented_button_graphing2.set(
-                loaded_data["segemented_button_graphing2"]
-            )
+    def load_config(self, show_message=True):
+        """Check if Configuration file exists, and load it when "load" button is clicked
+        
+        Args:
+            show_message: Whether to show success/error messages. Set to False for silent loading during startup.
+        """
+        try:
+            # Use json_path_handler to read from data_components folder
+            loaded_data = load_json(JsonFiles.CONFIG_JSON, default=None)
             
-            # Set new fields if they exist in loaded data
-            if "sorting_saving" in loaded_data:
-                self.frames["OperationPage"].sorting_saving.set(
-                    loaded_data["sorting_saving"]
-                )
+            if not loaded_data:
+                if show_message:
+                    messagebox.showwarning("Loading Failed", "Configuration file doesn't exist or is empty in data_components folder")
+                return
 
-            # Force entries to diasable or enable
+            # Set shared data values - using get() with default values for safety
+            self.shared_data["Startup"].set(loaded_data.get("Startup", ""))
+            self.shared_data["CTpath"].set(loaded_data.get("CT_path", ""))
+            self.shared_data["BMS_Database_Path"].set(loaded_data.get("BMS_Database_Path", ""))
+            self.shared_data["Theater"].set(loaded_data.get("Theater", ""))
+            self.shared_data["BMS_version"].set(loaded_data.get("BMS_version", ""))
+            self.shared_data["Geopath"].set(loaded_data.get("Geopath", ""))
+            self.shared_data["backup_CTpath"].set(loaded_data.get("backup_CTpath", ""))
+            self.shared_data["EditorSavingPath"].set(loaded_data.get("EditorSavingPath", ""))
+            self.shared_data["Database_Availability"].set(loaded_data.get("Database_Availability", ""))
+            self.shared_data["projection_path"].set(loaded_data.get("projection_path", ""))
+            self.shared_data["projection_string"].set(loaded_data.get("projection_string", ""))
+            
+            # Set dropdown and segmented button values
+            self.frames["OperationPage"].Fillter_optionmenu.set(loaded_data.get("Fillter_optionmenu", ""))
+            self.frames["OperationPage"].values_geo_optionmenu.set(loaded_data.get("values_geo_optionmenu", ""))
+            self.frames["OperationPage"].values_rand_optionmenu.set(loaded_data.get("values_rand_optionmenu", ""))
+            self.frames["OperationPage"].Selection_optionmenu.set(loaded_data.get("Selection_optionmenu", ""))
+            self.frames["OperationPage"].segemented_button.set(loaded_data.get("segemented_button", ""))
+            self.frames["OperationPage"].segemented_button_Saving.set(loaded_data.get("segemented_button_Saving", ""))
+            self.frames["OperationPage"].segemented_button_graphing1.set(loaded_data.get("segemented_button_graphing1", ""))
+            self.frames["OperationPage"].segemented_button_graphing2.set(loaded_data.get("segemented_button_graphing2", ""))
+            
+            # Set distribution selection if present (new feature)
+            if hasattr(self.frames["OperationPage"], "distribution_selection") and "distribution_selection" in loaded_data:
+                self.frames["OperationPage"].distribution_selection.set(loaded_data["distribution_selection"])
+            
+            # Set sorting saving option if present
+            if hasattr(self.frames["OperationPage"], "sorting_saving") and "sorting_saving" in loaded_data:
+                self.frames["OperationPage"].sorting_saving.set(loaded_data["sorting_saving"])
+
+            # Force entries to disable or enable
             self.frames["OperationPage"].value_State(
                 self.frames["OperationPage"].values_rand_optionmenu.get(), "rand"
             )
@@ -591,21 +542,32 @@ class MainPage(tk.Tk):
                     self.shared_data["CTpath"].set("No CT file selected")
                     for row in self.frames["DatabasePage"].ModelsTable.get_children():
                         self.frames["DatabasePage"].ModelsTable.delete(row)
-
-        else:
-            return messagebox.showwarning(
-                "Loading Aborted", "Configuration file couldn't be found."
-            )
+                        
+            # Show success message only if show_message is True
+            if show_message:
+                messagebox.showinfo("Loading Succeeded", "Configuration has been loaded successfully from data_components folder")
+            
+        except Exception as e:
+            # Log the error regardless of show_message setting
+            logging.error(f"Error loading configuration: {str(e)}")
+            
+            # Show error message only if show_message is True
+            if show_message:
+                messagebox.showerror("Loading Error", f"An error occurred while loading configuration: {str(e)}")
 
     def startup_definition(self):
-        """Check if startup is exist in the configuration file, it its exists"""
-        filename, filepath = "config.json", Path(r"config.json")
-        # filepath = Path(__file__).parent / Path(filename)
-        if os.path.isfile(filepath):
-            with open(filename, "r") as f:
-                loaded_data = json.load(f)
-            if loaded_data["Startup"] == "1":
-                self.load_config()
+        """Check if startup configuration exists in the config file, and apply it if it does"""
+        try:
+            # Use json_path_handler to read from data_components folder
+            config_data = load_json(JsonFiles.CONFIG_JSON, default=None)
+            
+            # If config exists and startup is enabled, load the configuration silently (without messages)
+            if config_data and config_data.get("Startup") == "1":
+                self.load_config(show_message=False)
+                
+        except Exception as e:
+            # Log the error but don't show a message box as this happens at startup
+            logging.error(f"Error loading startup configuration: {str(e)}")
 
     def Get_Version_Theater_From_path(self, file_path):
         """The Fucntion gets a path of CT XML file and analyze the version
@@ -648,7 +610,6 @@ class MainPage(tk.Tk):
                     break
             # if theater is not detected then N/A
             self.shared_data["Theater"].set(theater)
-
 
 class DashboardPage(tk.Frame):
     def __init__(self, parent, controller):
@@ -1086,8 +1047,13 @@ class DashboardPage(tk.Frame):
 
     def load_statistics_for_chart(self):
         try:
-            with gzip.open("feature_statistics.json.gz", "rt") as f:
+            # Get the path to feature_statistics.json.gz in the data_components folder
+            stats_path = get_json_path(JsonFiles.FEATURE_STATISTICS)
+            
+            # Open the file from the data_components folder
+            with gzip.open(stats_path, "rt") as f:
                 stats = json.load(f)
+                
             feature_types = stats["feature_types"]
             total_features = stats["total_features"]
             total_usage = stats["total_usage"]
@@ -1935,39 +1901,61 @@ class DatabasePage(tk.Frame):
         backup_CT_path = self.controller.shared_data["backup_CTpath"].get()
         db_path = os.path.join(ownPath, "Database", BMSVer, Theater, "database.db")
         db_save_path = os.path.join(ownPath, "Database", BMSVer, Theater)
-        # If db is detected in the detected folder, ask if you want to rewrite, else just create the db.
+        # Import the processing window functionality
+        from processing_window import run_with_processing
+        
+        # Gather all needed parameters first
+        CT_path = self.controller.shared_data["CTpath"].get()
+        debugger_state = self.controller.shared_data["debugger"]
+        
+        # If db is detected in the detected folder, ask if you want to rewrite BEFORE starting the processing window
         if os.path.isfile(db_path):
             result = messagebox.askyesno(
                 "Warning", "Suited Database has been found. Do you want to override it?"
             )
-            if result:
-                try:
-                    CT_path = self.controller.shared_data["CTpath"].get()
-                    debugger_state = self.controller.shared_data["debugger"]
-                    GenerateDB(
-                        CT_path, db_save_path, debugger_state, backup_CT_path
-                    )  # Get Db saved
-                    self.NewDBupdate()
-                except ValueError:
-                    messagebox.showwarning("Procedure Aborted", "Error has occurred")
-            else:
+            if not result:
                 messagebox.showwarning(
                     "Procedure Aborted", "The Database generating has been aborted."
                 )
-        else:
-            try:
-                CT_path = self.controller.shared_data["CTpath"].get()
-                debugger_state = self.controller.shared_data["debugger"]
-                GenerateDB(CT_path, db_save_path, debugger_state, backup_CT_path)
-                self.NewDBupdate()
-            except ValueError:
-                messagebox.showwarning("Procedure Aborted", "Error has occurred")
+                return
+                
+        try:
+            # Define the database generation task that will run in the background thread
+            def database_task(processing_window):
+                try:
+                    # Update the message to show what's happening
+                    processing_window.update_message("Extracting data from CT XML file...")
+                    
+                    # Call the GenerateDB function
+                    GenerateDB(CT_path, db_save_path, debugger_state, backup_CT_path)
+                    
+                    # Return success
+                    return True
+                except Exception as e:
+                    import traceback
+                    error_details = traceback.format_exc()
+                    logging.getLogger(__name__).error(f"Database generation error: {error_details}")
+                    raise
+            
+            # Run the database task with a processing window
+            run_with_processing(
+                parent=self.controller,
+                task_function=database_task,
+                title="Generating Database",
+                message="Initializing database generation..."
+            )
+            
+            # Update the UI after successful completion
+            self.NewDBupdate()
+            self.Udpate_existedDB_Tables()
+            
+            messagebox.showinfo(
+                "Success", "Database has been generated successfully"
+            )
+            
+        except Exception as e:
+            messagebox.showwarning("Procedure Aborted", f"Error has occurred: {str(e)}")
 
-        # Update existing database table
-        self.Udpate_existedDB_Tables()
-        return messagebox.showinfo(
-            "Success", "Database has been generated successfully"
-        )
 
     def NewDBupdate(self):
         """The function should be called after successful run of generating DB
@@ -2679,7 +2667,7 @@ class GeoDataPage(tk.Frame):
             return False  # Content is a valid float
         except ValueError:
             return True  # Content is not a valid float
-
+            
     def CalculateGeo(self):
         """will get Geo-Json file and If the file is valid, The box will be updated with the path string, and the structures list
         will be updated into the table in the page"""
@@ -2688,90 +2676,139 @@ class GeoDataPage(tk.Frame):
         except ValueError:
             return messagebox.showerror("Error", "GeoJson path is invalid")
 
-        if (
-            self.controller.shared_data["projection_string"].get()
-            or self.controller.shared_data["projection_string"].get() != ""
-        ):
-            string = self.controller.shared_data["projection_string"].get()
-            try:
-                debugger_state = self.controller.shared_data["debugger"]
-                if self.is_floor_height_not_valid(self.textbox_floor_height):
-                    GeoFeatures, CalcData_GeoFeatures, AOI_center = geo.Load_Geo_File(
-                        file_path, debugger_state, string
-                    )
-                else:
-                    GeoFeatures, CalcData_GeoFeatures, AOI_center = geo.Load_Geo_File(
-                        file_path,
-                        debugger_state,
-                        string,
-                        float(self.textbox_floor_height.get()),
-                    )
-                self.update_geo_data_GUI_fields(
-                    GeoFeatures, CalcData_GeoFeatures, AOI_center
-                )
-
-            except ValueError:
-                # Show message if string is not valid
-                messagebox.showerror(
-                    "Error", "Projection string or GeoJson path are not valid"
-                )
-                return
-        else:
-            try:
-                debugger_state = self.controller.shared_data["debugger"]
-                GeoFeatures, CalcData_GeoFeatures, AOI_center = geo.Load_Geo_File(
-                    file_path, debugger_state
-                )
-
-                self.update_geo_data_GUI_fields(
-                    GeoFeatures, CalcData_GeoFeatures, AOI_center
-                )
-
-            except ValueError:
-                return messagebox.showerror(
-                    "Error", "Projection string or GeoJson path are not valid"
-                )
-
-        # Convert data to dataframe and get the relevant data from it
-        GeoFeatures = pd.DataFrame(GeoFeatures)
-        CalcData_GeoFeatures = pd.DataFrame(CalcData_GeoFeatures)
-        heights = np.transpose(CalcData_GeoFeatures[["Height (feet)"]].values)
-        # Save all geo elements in global variables
-        self.controller.shared_data["Geodata"] = GeoFeatures
-        self.controller.shared_data["Calc_Geodata"] = CalcData_GeoFeatures
-        self.controller.shared_data["Geo_AOI_center"] = AOI_center
-
-        # Erase all data in the table
-        for row in self.GeoTable.get_children():
-            self.GeoTable.delete(row)
-            
-        # Update Geo data table with collected data
-        for i in range(len(GeoFeatures)):
-            # round the decimal numbers to 3, for better veiwing the data on the dable
-            data_list = list(GeoFeatures.iloc[i])
-            
-            # Clean the data list values - replace empty/false values with empty strings
-            data_list = self.clean_data_for_display(data_list)
-            
-            # Round numeric values for display
-            data_list[2:5] = [
-                round(val, 3) if isinstance(val, (int, float)) else val for val in data_list[2:5]
-            ]  # Round length, width, rotation
-            
-            try:
-                data_list[8] = round(
-                    float(heights[0, i]), 3
-                )  # Replace initial height from the raw Geofile to the calculated height
-            except:
-                data_list[9] = ""  # Use empty string instead of 0
-                
-            self.GeoTable.insert("", "end", values=data_list)
-
-        # Show message if succeeded
-        return messagebox.showinfo(
-            "Success", "The load of GeoData from GeoJson file has been succeeded"
-        )
+        # Import the processing window functionality
+        from processing_window import run_with_processing
         
+        # Check if projection string is available
+        has_projection = (
+            self.controller.shared_data["projection_string"].get()
+            and self.controller.shared_data["projection_string"].get() != ""
+        )
+        projection_string = self.controller.shared_data["projection_string"].get() if has_projection else None
+        debugger_state = self.controller.shared_data["debugger"]
+        
+        # Check if floor height is available
+        has_floor_height = not self.is_floor_height_not_valid(self.textbox_floor_height) if hasattr(self, 'textbox_floor_height') else False
+        floor_height = float(self.textbox_floor_height.get()) if has_floor_height else None
+        
+        # Define the GeoJSON loading task that will run in the background thread
+        def load_geojson_task(processing_window):
+            try:
+                # Update the message to show loading is in progress
+                processing_window.update_message("Loading GeoJSON file...")
+                
+                # Prepare arguments based on what's available
+                if has_projection:
+                    processing_window.update_message("Applying projection to GeoJSON data...")
+                    if has_floor_height:
+                        # Call with projection string and floor height
+                        result = geo.Load_Geo_File(
+                            file_path,
+                            debugger_state,
+                            projection_string,
+                            floor_height
+                        )
+                    else:
+                        # Call with projection string only
+                        result = geo.Load_Geo_File(
+                            file_path, 
+                            debugger_state, 
+                            projection_string
+                        )
+                else:
+                    # Call without projection string with floor height
+                    if has_floor_height:
+                        result = geo.Load_Geo_File(
+                            file_path, 
+                            debugger_state,
+                            None,
+                            floor_height
+                        )
+                    else:
+                        # Call without projection string and floor height
+                        result = geo.Load_Geo_File(
+                            file_path, 
+                            debugger_state
+                        )
+                    
+                # Update message for processing features
+                processing_window.update_message("Processing GeoJSON features...")
+                
+                # Return the results
+                return result
+                
+            except Exception as e:
+                import traceback
+                error_details = traceback.format_exc()
+                logging.getLogger(__name__).error(f"GeoJSON loading error: {error_details}")
+                raise ValueError("Projection string or GeoJson path are not valid")
+        
+        try:
+            # Run the GeoJSON loading task with a processing window
+            result = run_with_processing(
+                parent=self.controller,
+                task_function=load_geojson_task,
+                title="Loading GeoJSON Data",
+                message="Initializing GeoJSON loading..."
+            )
+            
+            # Unpack the results
+            GeoFeatures, CalcData_GeoFeatures, AOI_center = result
+            
+            # Update the UI with the loaded data
+            self.update_geo_data_GUI_fields(
+                GeoFeatures, CalcData_GeoFeatures, AOI_center
+            )
+            
+            # Convert data to dataframe and get the relevant data from it
+            GeoFeatures = pd.DataFrame(GeoFeatures)
+            CalcData_GeoFeatures = pd.DataFrame(CalcData_GeoFeatures)
+            heights = np.transpose(CalcData_GeoFeatures[["Height (feet)"]].values)
+            
+            # Save all geo elements in global variables
+            self.controller.shared_data["Geodata"] = GeoFeatures
+            self.controller.shared_data["Calc_Geodata"] = CalcData_GeoFeatures
+            self.controller.shared_data["Geo_AOI_center"] = AOI_center
+
+            # Erase all data in the table
+            for row in self.GeoTable.get_children():
+                self.GeoTable.delete(row)
+                
+            # Update Geo data table with collected data
+            for i in range(len(GeoFeatures)):
+                # round the decimal numbers to 3, for better veiwing the data on the dable
+                data_list = list(GeoFeatures.iloc[i])
+                
+                # Clean the data list values - replace empty/false values with empty strings
+                data_list = self.clean_data_for_display(data_list)
+                
+                # Round numeric values for display
+                data_list[2:5] = [
+                    round(val, 3) if isinstance(val, (int, float)) else val for val in data_list[2:5]
+                ]  # Round length, width, rotation
+                
+                try:
+                    data_list[8] = round(
+                        float(heights[0, i]), 3
+                    )  # Replace initial height from the raw Geofile to the calculated height
+                except:
+                    data_list[9] = ""  # Use empty string instead of 0
+                    
+                self.GeoTable.insert("", "end", values=data_list)
+
+            # Show message if succeeded
+            return messagebox.showinfo(
+                "Success", "The load of GeoData from GeoJson file has been succeeded"
+            )
+            
+        except ValueError as e:
+            return messagebox.showerror("Error", str(e) or "Projection string or GeoJson path are not valid")
+        except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            logging.getLogger(__name__).error(f"Unexpected error during GeoJSON loading: {error_details}")
+            return messagebox.showerror("Error", f"An unexpected error occurred: {str(e)}")
+
     def clean_data_for_display(self, data_list):
         """Cleans data values for display in the GeoTable
         Replaces empty/false/none values with empty strings"""
@@ -2926,6 +2963,7 @@ class OperationPage(tk.Frame):
     def __init__(self, parent, controller):
         tk.Frame.__init__(self, parent)
         self.controller = controller
+        self.configure(bg="#ffffff")
 
         self.Body_font = Ctk.CTkFont(family="Inter", size=15)
         self.Body_font_Bold = Ctk.CTkFont(family="Inter", size=15, weight="bold")
@@ -3252,6 +3290,23 @@ class OperationPage(tk.Frame):
             font=("Inter", 14 * -1),
         )
 
+        # Add distribution type selection
+        # Create the distribution_selection segmented button widget
+        self.distribution_selection = Ctk.CTkSegmentedButton(
+            self,
+            values=["Normal Distribution", "Peripheral Distribution", "Uniform Distribution"],
+            fg_color="#D5E3F0",
+            unselected_color="#D5E3F0",
+            selected_color="#8DBBE7",
+            font=Ctk.CTkFont(family="Inter", size=9),  # Smaller font to fit the button
+            height=20,
+            width=290,
+            text_color="#565454",
+            dynamic_resizing=False,
+        )
+        self.distribution_selection.place(x=487, y=135)
+        self.distribution_selection.set("Normal Distribution")  # Default selection
+
         self.canvas.create_text(
             287.0,
             175.0,
@@ -3517,7 +3572,7 @@ class OperationPage(tk.Frame):
         self.Auto_features_detector.place(x=589, y=388)
 
         self.canvas.create_text(
-            287.0,
+            286.0,
             340.0,
             anchor="nw",
             text="Values ",
@@ -3610,7 +3665,7 @@ class OperationPage(tk.Frame):
             286.0,
             521.0,
             anchor="nw",
-            text="Objective number",
+            text="CT number",
             fill="#000000",
             font=("Inter", 12 * -1),
         )
@@ -3620,17 +3675,18 @@ class OperationPage(tk.Frame):
             self,
             width=74,
             height=18,
+            fg_color="#FDFDFD",
             border_color="#D5E3F0",
             text_color="#565454",
             state="disable",
         )
-        self.textbox_Obj.place(x=460, y=544)
+        self.textbox_Obj.place(x=415, y=544)
 
         self.canvas.create_text(
             286.0,
             547.0,
             anchor="nw",
-            text="CT number",
+            text="Objective Number",
             fill="#000000",
             font=("Inter", 12 * -1),
         )
@@ -3640,11 +3696,12 @@ class OperationPage(tk.Frame):
             self,
             width=74,
             height=18,
+            fg_color="#FDFDFD",
             border_color="#D5E3F0",
             text_color="#565454",
             state="disable",
         )
-        self.textbox_CT.place(x=460, y=518)
+        self.textbox_CT.place(x=415, y=518)
 
         self.canvas.create_rectangle(
             256.5,
@@ -3665,6 +3722,7 @@ class OperationPage(tk.Frame):
         )
 
         # Create the segemented_button widget for Method Selection
+        self.saving_method_var = tk.StringVar(value="Editor")
         self.segemented_button_Saving = Ctk.CTkSegmentedButton(
             self,
             values=["BMS", "Editor"],
@@ -3676,6 +3734,8 @@ class OperationPage(tk.Frame):
             width=267,
             text_color="#565454",
             dynamic_resizing=False,
+            variable=self.saving_method_var,
+            command=self.switch_save_method
         )
         self.segemented_button_Saving.place(x=524, y=451)
         self.segemented_button_Saving.set("Editor")
@@ -3751,35 +3811,17 @@ class OperationPage(tk.Frame):
             self,
             width=30,
             height=10,
-            text="More",
+            text="Preferences",
             font=("Arial", 10),
             text_color="#565454",
-            # command=self.Browse_saving_path,
-            fg_color="#D5E3F0",
-            state="disabled",
+            command=self.open_bms_injection_window,  # Add command to open BMS injection window
+            fg_color="#D5E3F0"
         )
-        self.Get_More_button.place(x=499, y=490)
+        self.Get_More_button.place(x=467, y=490)
 
-        self.Get_Objective_button = Ctk.CTkButton(
-            self,
-            width=46,
-            height=18,
-            text="Browse",
-            # command=self.Browse_saving_path,
-            fg_color="#8DBBE7",
-            state="disabled",
-        )
-        self.Get_Objective_button.place(x=400, y=518)
-        self.Get_CT_button = Ctk.CTkButton(
-            self,
-            width=46,
-            height=18,
-            text="Browse",
-            # command=self.Browse_saving_path,
-            fg_color="#8DBBE7",
-            state="disabled",
-        )
-        self.Get_CT_button.place(x=400, y=544)
+        # Update CT and Objective entries to be wider since we're removing the Browse buttons
+        self.textbox_CT.configure(width=120)
+        self.textbox_Obj.configure(width=120)
 
         # Create the CTkTextbox widget for path for Editor Extraction
         self.Editor_Extraction_browse = Ctk.CTkButton(
@@ -4266,10 +4308,16 @@ class OperationPage(tk.Frame):
     def Create_Feature_List_For_BMS(self):
         # Check all requests before continue to the algorithm
         ## Set Version of Software:
-        BuildingGeneratorVer = "1.0"
+        BuildingGeneratorVer = "v1.2"
 
         generating_method = self.segemented_button.get()
-        saving_method = self.segemented_button_Saving.get()
+        saving_method = self.saving_method_var.get()
+        
+        # Make CT path from shared_data available to MainCode
+        import MainCode
+        if not hasattr(MainCode, "shared_data"):
+            MainCode.shared_data = self.controller.shared_data
+
         # ##########  GeoJson Generating method part ##########
         if generating_method == "GeoJson":
             # Check if geo-data calculated already
@@ -4287,16 +4335,19 @@ class OperationPage(tk.Frame):
                     if self.values_geo_optionmenu.get() == "Solid":
                         Values = max(min(int(self.textbox_Values_geo2.get()), 100), 0)
                         Values_i = None
+                        print(f"DEBUG: Set Solid value: Values={Values}, Values_i=None")
 
                     elif self.values_geo_optionmenu.get() == "Random":
                         Values = max(min(int(self.textbox_Values_geo2.get()), 100), 0)
                         Values_i = max(
                             min(int(self.textbox_Values_geo1.get()), Values), 0
                         )
-                    else:
+                        print(f"DEBUG: Set Random value range: Values_i={Values_i}, Values={Values}")
+                    else:  # Map mode
                         Values = None
                         Values_i = None
-
+                        print(f"DEBUG: Set Map mode: Values=None, Values_i=None")
+                    
                     # Prepere Presence of features through the Switch selection
                     Presence = max(min(int(self.textbox_Presence_geo2.get()), 100), 0)
                     # If range of presence is found set it in variable
@@ -4331,18 +4382,55 @@ class OperationPage(tk.Frame):
 
                     restriction_text = self.restriction_box.get("0.0", "end")
 
+                    # Import the processing window functionality
+                    from processing_window import run_with_processing
+                    
+                    # Capture current values of all variables needed in the task
+                    _num_features = num_features
+                    _db_path = DB_path
+                    _restriction_text = restriction_text
+                    _fillter = fillter
+                    _geo_features = GeoFeatures
+                    _calc_data_geo_features = CalcData_GeoFeatures
+                    
+                    # Define the feature generation task that will run in the background thread
+                    def generate_features_task(processing_window):
+                        try:
+                            # Update the message to show feature generation is in progress
+                            processing_window.update_message(f"Generating {_num_features} features using {_fillter} filter...")
+                            
+                            # Call the feature generation function
+                            result = Assign_features_accuratly(
+                                _num_features,
+                                _db_path,
+                                _restriction_text,
+                                _fillter,
+                                _geo_features,
+                                _calc_data_geo_features,
+                            )
+                            
+                            # Return the result
+                            return result
+                        except Exception as e:
+                            import traceback
+                            error_details = traceback.format_exc()
+                            logging.getLogger(__name__).error(f"Feature generation error: {error_details}")
+                            raise
+                    
+                    # Run the feature generation task with a processing window
+                    result = run_with_processing(
+                        parent=self.controller,
+                        task_function=generate_features_task,
+                        title="Generating Features",
+                        message="Initializing feature generation..."
+                    )
+                    
+                    # Unpack the results
                     (
                         Filltered_models,
                         self.Filltered_GeoFeatures,
                         self.Filltered_Calc_GeoFeatures,
-                    ) = Assign_features_accuratly(
-                        num_features,
-                        DB_path,
-                        restriction_text,
-                        fillter,
-                        GeoFeatures,
-                        CalcData_GeoFeatures,
-                    )
+                    ) = result
 
                     if saving_method == "Editor":
                         # initiate variables
@@ -4350,25 +4438,72 @@ class OperationPage(tk.Frame):
                             self.controller.shared_data["EditorSavingPath"].get(),
                             self.Editor_Extraction_name.get() + ".txt",
                         )
-                        self.BMS_features_map = Save_accurate_features(
-                            saving_method,
-                            num_features,
-                            self.Filltered_GeoFeatures,
-                            self.Filltered_Calc_GeoFeatures,
-                            DB_path,
-                            Filltered_models,
-                            selection,
-                            file_save_path,
-                            AOI_center,
-                            Presence,
-                            Values,
-                            Presence_i,
-                            Values_i,
-                            self.Auto_features_detector.get(),
-                            BuildingGeneratorVer,
-                            self.sorting_saving.get(),
-                            floor_height,
-                            floor_deviation,
+                        # Capture current values of all variables needed in the task
+                        _saving_method = saving_method
+                        _num_features = num_features
+                        _filltered_geo_features = self.Filltered_GeoFeatures
+                        _filltered_calc_geo_features = self.Filltered_Calc_GeoFeatures
+                        _db_path = DB_path
+                        _filltered_models = Filltered_models
+                        _selection = selection
+                        _file_save_path = file_save_path
+                        _aoi_center = AOI_center
+                        _presence = Presence
+                        _values = Values
+                        _presence_i = Presence_i
+                        _values_i = Values_i
+                        _auto_features = self.Auto_features_detector.get()
+                        _building_generator_ver = BuildingGeneratorVer
+                        _sorting_saving = self.sorting_saving.get()
+                        _floor_height = floor_height
+                        _floor_deviation = floor_deviation
+                        _ct_num = int(self.textbox_CT.get()) if self.textbox_CT.get() and self.saving_method_var.get() == "BMS" else None
+                        _obj_num = int(self.textbox_Obj.get()) if self.textbox_Obj.get() and self.saving_method_var.get() == "BMS" else None
+                        
+                        # Define the feature saving task that will run in the background thread
+                        def save_features_task(processing_window):
+                            try:
+                                # Update the message to show feature saving is in progress
+                                processing_window.update_message(f"Saving {_num_features} features in {_saving_method} format...")
+                                
+                                # Call the feature saving function
+                                result = Save_accurate_features(
+                                    _saving_method,
+                                    _num_features,
+                                    _filltered_geo_features,
+                                    _filltered_calc_geo_features,
+                                    _db_path,
+                                    _filltered_models,
+                                    _selection,
+                                    _file_save_path,
+                                    _aoi_center,
+                                    _presence,
+                                    _values,
+                                    _presence_i,
+                                    _values_i,
+                                    _auto_features,
+                                    _building_generator_ver,
+                                    _sorting_saving,
+                                    _floor_height,
+                                    _floor_deviation,
+                                    _ct_num,
+                                    _obj_num
+                                )
+                                
+                                # Return the result
+                                return result
+                            except Exception as e:
+                                import traceback
+                                error_details = traceback.format_exc()
+                                logging.getLogger(__name__).error(f"Feature saving error: {error_details}")
+                                raise
+                        
+                        # Run the feature saving task with a processing window
+                        self.BMS_features_map = run_with_processing(
+                            parent=self.controller,
+                            task_function=save_features_task,
+                            title=f"Saving {saving_method} Features",
+                            message="Initializing feature saving..."
                         )
 
                         # Update other dashboard elements as needed
@@ -4385,10 +4520,191 @@ class OperationPage(tk.Frame):
                             self.auto_graph_generating()
 
                     elif saving_method == "BMS":
-                        return messagebox.showinfo(
-                            "Operation Denied",
-                            "Extraction directly to BMS is currently not implemented",
+                        # Debug print at start of BMS processing
+                        print("\n===== STARTING BMS INJECTION PROCESS =====\n")
+                        
+                        # Get CT and Obj numbers
+                        try:
+                            ct_num = int(self.textbox_CT.get())
+                            obj_num = int(self.textbox_Obj.get())
+                            print(f"DEBUG: CT number = {ct_num}, Objective number = {obj_num}")
+                        except (ValueError, TypeError) as e:
+                            print(f"DEBUG: Error parsing CT or objective numbers: {e}")
+                            return messagebox.showwarning(
+                                "Procedure Aborted",
+                                "CT Number and Objective Number must be valid integers."
+                            )
+                        
+                        # Import the processing window functionality if not already imported
+                        from processing_window import run_with_processing
+                        print("DEBUG: Successfully imported run_with_processing")
+                        
+                        # Check which method is selected: Random or GeoJSON
+                        print(f"DEBUG: Selected method = {selection_method}")
+                        
+                        # Store common variables used by both methods
+                        print("DEBUG: Setting up common variables")
+                        _num_features = num_features
+                        _db_path = DB_path
+                        _file_save_path = os.path.join(
+                            self.controller.shared_data["EditorSavingPath"].get(),
+                            self.Editor_Extraction_name.get() + ".txt"
                         )
+                        _filltered_models = Filltered_models
+                        _auto_features = self.Auto_features_detector.get()
+                        _building_generator_ver = BuildingGeneratorVer
+                        _sorting_saving = self.sorting_saving.get()
+                        _ct_num = ct_num
+                        _obj_num = obj_num
+                        
+                        # Define the feature saving task based on the selection method
+                        if selection_method == "Random Selection":
+                            print("\n=== USING RANDOM SELECTION FOR BMS INJECTION ===\n")
+                            
+                            # Get the radius for random placement
+                            try:
+                                _radius = float(self.textbox_Radius_random.get())
+                            except (ValueError, TypeError) as e:
+                                logging.getLogger(__name__).error(f"Error parsing radius: {e}")
+                                return messagebox.showwarning(
+                                    "Procedure Aborted",
+                                    "Radius must be a valid number for Random Selection."
+                                )
+                                
+                            # Get values and presence parameters for random selection
+                            try:
+                                _values_random = Values_rand
+                                _values_i_random = Values_i_rand 
+                                _presence_random = Presence_rand
+                                _presence_i_random = Presence_i_rand
+                            except Exception as e:
+                                logging.getLogger(__name__).error(f"Error setting random parameters: {e}")
+                                import traceback
+                                logging.getLogger(__name__).error(f"Traceback: {traceback.format_exc()}")
+                            
+                            def save_features_task_bms(processing_window):
+                                try:
+                                    # Get the selected distribution type
+                                    distribution_type = self.distribution_selection.get()
+                                    
+                                    # Update the message to show random feature generation is in progress for BMS
+                                    processing_window.update_message(f"Generating {_num_features} random features for BMS objective {_obj_num} using {distribution_type}...")
+                                    
+                                    # Log minimal but useful information
+                                    logging.info(f"Using {distribution_type} for {_num_features} features with radius {_radius}")
+                                    
+                                    # First, generate the random features using the distribution type
+                                    random_features = Assign_features_randomly(
+                                        _num_features, 
+                                        _radius, 
+                                        _db_path, 
+                                        _restriction_text, 
+                                        distribution_type
+                                    )
+                                    
+                                    if random_features is None or isinstance(random_features, TypeError):
+                                        raise ValueError("Failed to generate random features")
+                                        
+                                    # Unpack the returned features
+                                    selected_data, x_coordinates, y_coordinates = random_features
+                                    
+                                    # Now call Save_random_features with the generated features
+                                    result = Save_random_features(
+                                        "BMS",  # saving_method
+                                        _num_features,
+                                        selected_data,  # Use the randomly generated features
+                                        x_coordinates,
+                                        y_coordinates,
+                                        _file_save_path,
+                                        _building_generator_ver,
+                                        _presence_random,
+                                        _values_random,
+                                        _presence_i_random,
+                                        _values_i_random,
+                                        _sorting_saving,
+                                        _ct_num,
+                                        _obj_num
+                                    )
+                                    return result
+                                except Exception as e:
+                                    import traceback
+                                    error_details = traceback.format_exc()
+                                    logging.getLogger(__name__).error(f"Random BMS feature generation error: {error_details}")
+                                    raise
+                        else:  # GeoJSON selection
+                            # These variables are only needed for accurate placement
+                            _filltered_geo_features = self.Filltered_GeoFeatures
+                            _filltered_calc_geo_features = self.Filltered_Calc_GeoFeatures
+                            _selection = selection
+                            _aoi_center = AOI_center
+                            _presence = Presence
+                            _values = Values
+                            _presence_i = Presence_i
+                            _values_i = Values_i
+                            _floor_height = floor_height
+                            _floor_deviation = floor_deviation
+                            
+                            def save_features_task_bms(processing_window):
+                                try:
+                                    # Update the message to show feature saving is in progress for BMS
+                                    processing_window.update_message(f"Injecting {_num_features} features into BMS objective {_obj_num}...")
+                                    
+                                    # Call the feature saving function with BMS parameters
+                                    return Save_accurate_features(
+                                        "BMS",  # saving_method
+                                        _num_features,
+                                        _filltered_geo_features,
+                                        _filltered_calc_geo_features,
+                                        _db_path,
+                                        _filltered_models,
+                                        _selection,
+                                        _file_save_path,
+                                        _aoi_center,
+                                        _presence,
+                                        _values,
+                                        _presence_i,
+                                        _values_i,
+                                        _auto_features,
+                                        _building_generator_ver,
+                                        _sorting_saving,
+                                        _floor_height,
+                                        _floor_deviation,
+                                        _ct_num,
+                                        _obj_num
+                                    )
+                                except Exception as e:
+                                    import traceback
+                                    error_details = traceback.format_exc()
+                                    logging.getLogger(__name__).error(f"GeoJSON BMS feature generation error: {error_details}")
+                                    raise
+                        
+                        try:
+                            self.BMS_features_map = run_with_processing(
+                                parent=self.controller,
+                                task_function=save_features_task_bms,
+                                title="Injecting Features into BMS",
+                                message="Initializing BMS feature injection..."
+                            )
+                        except Exception as e:
+                            logging.getLogger(__name__).error(f"Error in BMS injection: {str(e)}")
+                            import traceback
+                            logging.getLogger(__name__).error(f"Traceback: {traceback.format_exc()}")
+                            raise
+                        
+                        # Update other dashboard elements as needed
+                        try:
+                            self.controller.frames["DashboardPage"].update_pie_chart()
+                        except Exception as e:
+                            logging.getLogger(__name__).warning(f"Error updating dashboard: {str(e)}")
+                        
+                        # Only show success message if BMS injection was successful
+                        if self.BMS_features_map:
+                            messagebox.showinfo(
+                                "Operation succeeded",
+                                f"Successfully injected {num_features} accurate features into BMS objective {obj_num}."
+                            )
+                            # Will generate graph of the BMSfeatures/GeoFeatures based on the segmented button in the GUI
+                            self.auto_graph_generating()
 
                 else:
                     # if Database_Availability is 0, place error (no valid db)
@@ -4454,33 +4770,101 @@ class OperationPage(tk.Frame):
                     )
 
                 if saving_method == "Editor":
-                    selected_data, x_coordinates, y_coordinates = (
-                        Assign_features_randomly(
-                            num_features, Radius, DB_path, restriction_text
-                        )
-                    )
-
-                    # initiate save path
+                    # Import the processing window functionality if not already imported
+                    from processing_window import run_with_processing
+                    
+                    # Get the file save path - file override will be handled by FileManager later
                     file_save_path = os.path.join(
                         self.controller.shared_data["EditorSavingPath"].get(),
                         self.Editor_Extraction_name.get() + ".txt",
                     )
+                    
+                    # Now capture all variables needed in the task
+                    _num_features = num_features
+                    _radius = Radius
+                    _db_path = DB_path
+                    _restriction_text = restriction_text
+                    _file_save_path = file_save_path
+                    
+                    # Define the random feature generation task that will run in the background thread
+                    def random_features_task(processing_window):
+                        try:
+                            # Get the selected distribution type
+                            distribution_type = self.distribution_selection.get()
+                            
+                            # Update the message to show random feature generation is in progress with distribution info
+                            processing_window.update_message(f"Generating {_num_features} random features with {_radius} radius using {distribution_type}...")
+                            
+                            # Call the random feature generation function with distribution type
+                            return Assign_features_randomly(
+                                _num_features, _radius, _db_path, _restriction_text, distribution_type
+                            )
+                        except Exception as e:
+                            import traceback
+                            error_details = traceback.format_exc()
+                            logging.getLogger(__name__).error(f"Random feature generation error: {error_details}")
+                            raise
+                    
+                    # Run the random feature generation task with a processing window
+                    result = run_with_processing(
+                        parent=self.controller,
+                        task_function=random_features_task,
+                        title="Generating Random Features",
+                        message="Initializing random feature generation..."
+                    )
+                    
+                    # Get the generated features
+                    selected_data, x_coordinates, y_coordinates = result
 
-                    self.BMS_features_map = Save_random_features(
-                        saving_method,
-                        num_features,
-                        selected_data,
-                        x_coordinates,
-                        y_coordinates,
-                        file_save_path,
-                        BuildingGeneratorVer,
-                        Presence,
-                        Values,
-                        Presence_i,
-                        Values_i,
-                        self.sorting_saving.get(),
-                        CT_Num=None,
-                        Obj_Num=None,
+                    # Capture current values of all variables needed in the task
+                    _saving_method = saving_method
+                    _num_features = num_features
+                    _selected_data = selected_data
+                    _x_coordinates = x_coordinates
+                    _y_coordinates = y_coordinates
+                    _file_save_path = file_save_path
+                    _building_generator_ver = BuildingGeneratorVer
+                    _presence = Presence
+                    _values = Values
+                    _presence_i = Presence_i
+                    _values_i = Values_i
+                    _sorting_saving = self.sorting_saving.get()
+                    
+                    # Define the random feature saving task that will run in the background thread
+                    def save_random_features_task(processing_window):
+                        try:
+                            # Update the message to show random feature saving is in progress
+                            processing_window.update_message(f"Saving {_num_features} random features in {_saving_method} format...")
+                            
+                            # Call the random feature saving function
+                            return Save_random_features(
+                                _saving_method,
+                                _num_features,
+                                _selected_data,
+                                _x_coordinates,
+                                _y_coordinates,
+                                _file_save_path,
+                                _building_generator_ver,
+                                _presence,
+                                _values,
+                                _presence_i,
+                                _values_i,
+                                _sorting_saving,
+                                None,  # CT_Num
+                                None   # Obj_Num
+                            )
+                        except Exception as e:
+                            import traceback
+                            error_details = traceback.format_exc()
+                            logging.getLogger(__name__).error(f"Random feature saving error: {error_details}")
+                            raise
+                    
+                    # Run the random feature saving task with a processing window
+                    self.BMS_features_map = run_with_processing(
+                        parent=self.controller,
+                        task_function=save_random_features_task,
+                        title=f"Saving Random Features",
+                        message="Initializing random feature saving..."
                     )
 
                     # Update other dashboard elements as needed
@@ -4497,12 +4881,353 @@ class OperationPage(tk.Frame):
                         # Will generate graph of the BMSfeatures/GeoFeatures based on the segmented button in the GUI
                         self.auto_graph_generating()
 
-            elif saving_method == "BMS":
-                return messagebox.showinfo(
-                    "Operation Denied",
-                    "Extraction directly to BMS is currently not implemented",
-                )
+                elif saving_method == "BMS":
+                    try:
+                        # Get CT and Obj numbers
+                        ct_num = int(self.textbox_CT.get())
+                        obj_num = int(self.textbox_Obj.get())
+                        
+                        # Check if CT and Obj numbers are valid (must be greater than 0)
+                        if ct_num <= 0 or obj_num <= 0:
+                            return messagebox.showwarning(
+                                "Procedure Aborted",
+                                "CT Number and Objective Number must be greater than 0."
+                            )
+                    except (ValueError, TypeError):
+                        return messagebox.showwarning(
+                            "Procedure Aborted",
+                            "CT Number and Objective Number must be valid integers."
+                        )
+                    
+                    # Import the processing window functionality if not already imported
+                    from processing_window import run_with_processing
+                    
+                    # Get the file save path - file override will be handled later
+                    file_save_path = os.path.join(
+                        self.controller.shared_data["EditorSavingPath"].get(),
+                        self.Editor_Extraction_name.get() + ".txt",
+                    )
+                    
+                    # Capture all variables needed for the background task
+                    _num_features = num_features
+                    _radius = Radius
+                    _db_path = DB_path
+                    _restriction_text = restriction_text
+                    _file_save_path = file_save_path
+                    _building_generator_ver = BuildingGeneratorVer 
+                    _presence = Presence
+                    _values = Values
+                    _presence_i = Presence_i 
+                    _values_i = Values_i
+                    _sorting_option = self.sorting_saving.get()
+                    _ct_num = ct_num
+                    _obj_num = obj_num
+                    
+                    # Define the task function that will run in the background thread
+                    def random_bms_task(processing_window):
+                        try:
+                            # Get the selected distribution type
+                            distribution_type = self.distribution_selection.get()
+                            
+                            # Step 1: Generate random features
+                            processing_window.update_message(f"Generating {_num_features} random features using {distribution_type}...")
+                            random_result = Assign_features_randomly(
+                                _num_features, _radius, _db_path, _restriction_text, distribution_type
+                            )
+                            
+                            if isinstance(random_result, Exception):
+                                raise ValueError("No features found matching the restrictions.")
+                                
+                            selected_data, x_coordinates, y_coordinates = random_result
+                            
+                            # Step 2: Save features to BMS
+                            processing_window.update_message(f"Injecting {_num_features} features into BMS objective {_obj_num}...")
+                            
+                            return Save_random_features(
+                                "BMS",  # saving_method
+                                _num_features,
+                                selected_data,
+                                x_coordinates,
+                                y_coordinates,
+                                _file_save_path,
+                                _building_generator_ver,
+                                _presence,
+                                _values,
+                                _presence_i,
+                                _values_i,
+                                _sorting_option,
+                                _ct_num,
+                                _obj_num
+                            )
+                        except Exception as e:
+                            import traceback
+                            error_details = traceback.format_exc()
+                            logging.getLogger(__name__).error(f"Random BMS feature generation error: {error_details}")
+                            raise
+                    
+                    # Run the task with a processing window
+                    self.BMS_features_map = run_with_processing(
+                        parent=self.controller,
+                        task_function=random_bms_task,
+                        title="BMS Random Feature Injection",
+                        message="Initializing random feature generation for BMS..."
+                    )
 
+                    # Update other dashboard elements as needed
+                    self.controller.frames["DashboardPage"].update_pie_chart()
+
+                    # Only show success message if save was successful
+                    if self.BMS_features_map:
+                        messagebox.showinfo(
+                            "Operation succeeded",
+                            f"Successfully injected {num_features} features into BMS objective {obj_num}."
+                        )
+
+                        # Will generate graph of the BMSfeatures/GeoFeatures based on the segmented button in the GUI
+                        self.auto_graph_generating()
+
+    # Add a new method for handling save method switching
+    def switch_save_method(self, value):
+        """Handle switching between Editor and BMS save methods"""
+        if value == "BMS":
+            # Enable CT and Objective number fields for initial entry
+            self.textbox_CT.configure(state="normal")
+            self.textbox_Obj.configure(state="normal")
+            
+            # Make them required by changing background color
+            self.textbox_CT.configure(fg_color="#F0F8FF")
+            self.textbox_Obj.configure(fg_color="#F0F8FF")
+            
+            # Enable the More button for BMS injection
+            self.Get_More_button.configure(state="normal")
+            
+            # If values are already entered, disable editing
+            if self.textbox_CT.get() and self.textbox_Obj.get():
+                self.textbox_CT.configure(state="disable")
+                self.textbox_Obj.configure(state="disable")
+        else:
+            # Reset to disabled state
+            self.textbox_CT.configure(state="disable")
+            self.textbox_Obj.configure(state="disable")
+            
+            # Reset background color
+            self.textbox_CT.configure(fg_color="#F9F9FA")
+            self.textbox_Obj.configure(fg_color="#F9F9FA")
+            
+            # Disable the More button for BMS injection
+            self.Get_More_button.configure(state="disabled")
+
+    # Add new methods for BMS injection functionality
+    def open_bms_injection_window(self):
+        """
+        Open the BMS Injection Configuration window from the Preferences button.
+        
+        This method opens the BMS Injection Configuration window allowing users to
+        configure objective properties for injection. It passes the current CT and
+        objective numbers to the window if they are available, and updates these
+        values in the main UI when the user saves their settings.
+        """
+        try:
+            from components.bms_injection_window import BmsInjectionWindow
+            
+            # Get CT and Obj numbers if available
+            try:
+                ct_num = int(self.textbox_CT.get()) if self.textbox_CT.get() else None
+                obj_num = int(self.textbox_Obj.get()) if self.textbox_Obj.get() else None
+            except ValueError:
+                ct_num = None
+                obj_num = None
+            
+            # Get BMS path from the CT file path
+            bms_path = os.path.dirname(self.controller.shared_data["CTpath"].get())
+            
+            # Create and show the window
+            window = BmsInjectionWindow(
+                self,
+                ct_num=ct_num,
+                obj_num=obj_num,
+                bms_path=bms_path
+            )
+            
+            # When window closes, update CT and Obj numbers if available
+            self.wait_window(window)
+            
+            # Debug: Print if window has result attribute
+            print(f"Window has result attribute: {hasattr(window, 'result')}")
+            
+            if hasattr(window, 'result'):
+                # Enable the entries in case they're disabled
+                if self.textbox_CT.cget("state") == "disable":
+                    self.textbox_CT.configure(state="normal")
+                if self.textbox_Obj.cget("state") == "disable":
+                    self.textbox_Obj.configure(state="normal")
+                
+                # Update the entries with the new values
+                self.textbox_CT.delete(0, "end")
+                self.textbox_CT.insert(0, str(window.result["ct_num"]))
+                
+                self.textbox_Obj.delete(0, "end")
+                self.textbox_Obj.insert(0, str(window.result["obj_num"]))
+                
+                # If BMS mode is not active, switch to it
+                if self.saving_method_var.get() != "BMS":
+                    self.segemented_button_Saving.set("BMS")
+                    self.switch_save_method("BMS")
+                else:
+                    # Make sure entries are disabled if BMS mode is already active
+                    self.textbox_CT.configure(state="disable")
+                    self.textbox_Obj.configure(state="disable")
+                
+                # Debug: Print updated values
+                print(f"Updated CT: {self.textbox_CT.get()}, Obj: {self.textbox_Obj.get()}")
+                
+        except Exception as e:
+            messagebox.showerror(
+                "Error",
+                f"Could not open BMS Injection window: {str(e)}"
+            )
+    
+    def browse_objective_numbers(self):
+        """Open a window to browse and select available objective numbers"""
+        try:
+            # Get BMS path
+            bms_path = os.path.dirname(self.controller.shared_data["CTpath"].get())
+            obj_dir = os.path.join(bms_path, "ObjectiveRelatedData")
+            
+            if not os.path.exists(obj_dir):
+                messagebox.showwarning(
+                    "Warning",
+                    f"ObjectiveRelatedData directory not found at {obj_dir}"
+                )
+                return
+            
+            # Get list of existing objectives
+            obj_numbers = []
+            for entry in os.listdir(obj_dir):
+                if entry.startswith("OCD_") and os.path.isdir(os.path.join(obj_dir, entry)):
+                    try:
+                        obj_num = int(entry.split("_")[1])
+                        obj_numbers.append(obj_num)
+                    except (ValueError, IndexError):
+                        pass
+            
+            if not obj_numbers:
+                messagebox.showinfo(
+                    "Information",
+                    "No existing objectives found. You can create a new one by entering a number."
+                )
+                return
+            
+            # Create a simple selection dialog
+            selection_dialog = tk.Toplevel(self)
+            selection_dialog.title("Select Objective Number")
+            selection_dialog.geometry("300x400")
+            selection_dialog.transient(self)
+            selection_dialog.grab_set()
+            
+            # Create listbox with objectives
+            listbox = tk.Listbox(selection_dialog)
+            listbox.pack(fill="both", expand=True, padx=10, pady=10)
+            
+            # Sort objective numbers
+            obj_numbers.sort()
+            
+            # Add objectives to listbox
+            for obj_num in obj_numbers:
+                listbox.insert("end", f"Objective {obj_num}")
+            
+            # Add a selection button
+            def on_select():
+                selection = listbox.curselection()
+                if selection:
+                    obj_num = obj_numbers[selection[0]]
+                    self.textbox_Obj.delete(0, "end")
+                    self.textbox_Obj.insert(0, str(obj_num))
+                selection_dialog.destroy()
+            
+            button = tk.Button(selection_dialog, text="Select", command=on_select)
+            button.pack(pady=10)
+            
+        except Exception as e:
+            messagebox.showerror(
+                "Error",
+                f"Error browsing objectives: {str(e)}"
+            )
+    
+    def browse_ct_numbers(self):
+        """Open a window to browse and select available CT numbers"""
+        try:
+            # Get BMS path and CT file
+            ct_file_path = self.controller.shared_data["CTpath"].get()
+            
+            if not os.path.exists(ct_file_path):
+                messagebox.showwarning(
+                    "Warning",
+                    f"CT file not found at {ct_file_path}"
+                )
+                return
+            
+            # Parse CT file to find objectives
+            import xml.etree.ElementTree as ET
+            tree = ET.parse(ct_file_path)
+            root = tree.getroot()
+            
+            # Find objectives (EntityType=3)
+            objective_cts = []
+            for ct in root.findall("CT"):
+                try:
+                    ct_num = int(ct.get("Num"))
+                    entity_type = int(ct.find("EntityType").text)
+                    
+                    if entity_type == 3:
+                        # It's an objective
+                        objective_type = int(ct.find("Type").text)
+                        objective_cts.append((ct_num, objective_type))
+                except (ValueError, AttributeError, TypeError):
+                    pass
+            
+            if not objective_cts:
+                messagebox.showinfo(
+                    "Information",
+                    "No objective CTs found in the CT file."
+                )
+                return
+            
+            # Create a simple selection dialog
+            selection_dialog = tk.Toplevel(self)
+            selection_dialog.title("Select CT Number")
+            selection_dialog.geometry("300x400")
+            selection_dialog.transient(self)
+            selection_dialog.grab_set()
+            
+            # Create listbox with CT numbers
+            listbox = tk.Listbox(selection_dialog, width=40)
+            listbox.pack(fill="both", expand=True, padx=10, pady=10)
+            
+            # Sort CT numbers
+            objective_cts.sort()
+            
+            # Add CT numbers to listbox
+            for ct_num, obj_type in objective_cts:
+                listbox.insert("end", f"CT {ct_num} (Objective Type {obj_type})")
+            
+            # Add a selection button
+            def on_select():
+                selection = listbox.curselection()
+                if selection:
+                    ct_num = objective_cts[selection[0]][0]
+                    self.textbox_CT.delete(0, "end")
+                    self.textbox_CT.insert(0, str(ct_num))
+                selection_dialog.destroy()
+            
+            button = tk.Button(selection_dialog, text="Select", command=on_select)
+            button.pack(pady=10)
+            
+        except Exception as e:
+            messagebox.showerror(
+                "Error",
+                f"Error browsing CT numbers: {str(e)}"
+                )
 
 if __name__ == "__main__":
     app = MainPage()
