@@ -17,7 +17,7 @@ class JsonFiles:
     # Template files
     OBJECTIVE_TEMPLATES = "objective_templates.json"
     CT_TEMPLATES = "ct_templates.json"
-    COMPREHENSIVE_CT_TEMPLATES = "comprehensive_ct_templates.json"
+    # COMPREHENSIVE_CT_TEMPLATES was removed - functionality merged with CT_TEMPLATES
     
     # Cache files
     OBJECTIVE_CACHE = "objective_cache.json"

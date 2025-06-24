@@ -843,7 +843,7 @@ def Assign_features_randomly(num_features, radius, DB_path, DB_restrictions, dis
     Returns:
         Tuple of (selected_data, x_coordinates, y_coordinates)
     """
-    print(f"Using distribution type: {distribution_type}")
+    logger.info(f"Using distribution type: {distribution_type}")
     # Load the database file containing the features data (mydatabase.db)
     AllBMSModels = Load_Db(DB_path, DB_restrictions)  # Options ModelNum, Name, Type
 
@@ -1177,7 +1177,6 @@ def Assign_features_randomly(num_features, radius, DB_path, DB_restrictions, dis
             
             # ALWAYS log warning for failed placements - this is critical!
             failure_msg = f"WARNING: Feature {i} ({feature['FeatureName'] if 'FeatureName' in feature else 'unknown'}) placed with COLLISION at ({x:.2f}, {y:.2f}) after {attempts} failed attempts - overlap score: {best_overlap_score:.2f}"
-            print(failure_msg)  # Print to console
             logger.warning(failure_msg)  # Log as warning
 
     return selected_data, x_coordinates, y_coordinates
@@ -1196,6 +1195,7 @@ def Save_random_features(
     Presence_i,
     Values_i,
     sort_option,
+    shared_data_dict,  # Added shared_data_dict parameter
     CT_Num=None,
     Obj_Num=None
 ):
@@ -1248,27 +1248,46 @@ def Save_random_features(
 
     # Check if we're using BMS injection mode
     if SaveType == "BMS" and CT_Num is not None and Obj_Num is not None:
-        print("\n===== BMS INJECTION MODE DETECTED =====\n")
+        logger.info("\n===== BMS INJECTION MODE DETECTED =====\n")
         try:
-            print("DEBUG: Importing BMS injection modules")
+            logger.info("DEBUG: Importing BMS injection modules")
             from bms_injector import BmsInjector
             from pathlib import Path
             import tkinter as tk
             from tkinter import messagebox
-            print("DEBUG: Successfully imported BMS injection modules")
+            logger.info("DEBUG: Successfully imported BMS injection modules")
             
-            # Get BMS path from shared_data CTpath if available
-            print("DEBUG: Determining BMS path")
-            if 'shared_data' in globals() and 'CTpath' in shared_data and shared_data["CTpath"].get():
-                bms_path = os.path.dirname(shared_data["CTpath"].get())
-                print(f"DEBUG: Using path from shared_data: {bms_path}")
+            # Get BMS path from shared_data_dict CTpath if available
+            logger.info("DEBUG: Determining BMS path")
+            if shared_data_dict and 'CTpath' in shared_data_dict and shared_data_dict["CTpath"].get():
+                bms_path = os.path.dirname(shared_data_dict["CTpath"].get())
+                logger.info(f"DEBUG: Using path from shared_data_dict: {bms_path}")
             else:
                 # Fall back to SavePath parent directory
                 bms_path = Path(output_file_path).parent
-                print(f"DEBUG: Using fallback path from output_file_path: {bms_path}")
+                logger.info(f"DEBUG: Using fallback path from output_file_path: {bms_path}")
             
-            # Create BMS injector instance
-            injector = BmsInjector(bms_path)
+            # Get backup setting from shared_data_dict if available
+            backup_bms_files = False  # Default to True for safety
+            if shared_data_dict and 'backup_bms_files' in shared_data_dict:
+                # Make sure to handle if shared_data_dict['backup_bms_files'] is already a boolean
+                backup_setting = shared_data_dict['backup_bms_files']
+                if isinstance(backup_setting, tk.StringVar): # Check if it's a Tkinter StringVar
+                    backup_value = backup_setting.get()
+                    backup_bms_files = backup_value == '1'
+                elif isinstance(backup_setting, str): # Check if it's a plain string '0' or '1'
+                    backup_bms_files = backup_setting == '1'
+                elif isinstance(backup_setting, bool): # Check if it's already a boolean
+                    backup_bms_files = backup_setting
+                else:
+                    logger.warning(f"Unknown type for backup_bms_files in shared_data_dict (Save_accurate_features): {type(backup_setting)}. Defaulting to True.")
+                    backup_bms_files = False # Default to true if type is unexpected
+                logger.info(f"BMS file backup {'enabled' if backup_bms_files else 'disabled'}")
+            else:
+                logger.warning("shared_data_dict or 'backup_bms_files' not found in Save_accurate_features. Defaulting to backup_bms_files=False")
+            
+            # Create BMS injector instance with appropriate backup setting
+            injector = BmsInjector(bms_path, backup=backup_bms_files)
             
             # Check if CT is an objective
             is_objective = injector.is_objective_ct(CT_Num)
@@ -1307,7 +1326,7 @@ def Save_random_features(
                     
                     # Check if we have saved settings for this CT/Obj combination
                     if saved_settings and saved_settings.get("ct_num") == CT_Num and saved_settings.get("obj_num") == Obj_Num:
-                        print(f"Found settings for CT:{CT_Num} Obj:{Obj_Num}")
+                        logger.info(f"Found settings for CT:{CT_Num} Obj:{Obj_Num}")
                         obj_type = saved_settings.get("type")
                         name = saved_settings.get("name")
                         reset_pd = saved_settings.get("reset_pd", True)
@@ -1327,9 +1346,8 @@ def Save_random_features(
                                 typed_fields[field_name] = value
                                 
                         fields = typed_fields
-                        print(f"Using saved settings: type={obj_type}, name={name}, reset_pd={reset_pd}")
+                        logger.info(f"Using saved settings: type={obj_type}, name={name}, reset_pd={reset_pd}")
                     else:
-                        print(f"No matching previous settings found")
                         logger.error(f"No saved settings found for CT:{CT_Num} Obj:{Obj_Num}")
                         messagebox.showerror(
                             "Missing Configuration",
@@ -1340,7 +1358,6 @@ def Save_random_features(
                         return None
                 except Exception as e:
                     error_msg = f"Error loading saved settings: {e}"
-                    print(error_msg)
                     logger.error(error_msg)
                     messagebox.showerror(
                         "Error",
@@ -1354,46 +1371,45 @@ def Save_random_features(
                 root.destroy()
                         
                 # Update injector with new path if changed
-                if bms_path != str(injector.bms_path):
-                    injector = BmsInjector(bms_path)
+                injector = BmsInjector(bms_path, backup=backup_bms_files)
                 
                 # Create objective and inject features in one operation
-                print("\n===== INJECTING FEATURES INTO BMS =====\n")
-                print(f"DEBUG: Calling create_and_inject_objective with {len(feature_entries)} features")
-                print(f"DEBUG: Obj_Num = {Obj_Num}, CT_Num = {CT_Num}, name = {name}, obj_type = {obj_type}")
-                print(f"DEBUG: Feature entries sample (first 3): {feature_entries[:3] if len(feature_entries) >= 3 else feature_entries}")
+                logger.info("\n===== INJECTING FEATURES INTO BMS =====\n")
+                logger.info(f"DEBUG: Calling create_and_inject_objective with {len(feature_entries)} features")
+                logger.info(f"DEBUG: Obj_Num = {Obj_Num}, CT_Num = {CT_Num}, name = {name}, obj_type = {obj_type}")
+                logger.info(f"DEBUG: Feature entries sample (first 3): {feature_entries[:3] if len(feature_entries) >= 3 else feature_entries}")
                 
                 try:
                     injection_result = injector.create_and_inject_objective(Obj_Num, CT_Num, name, obj_type, feature_entries, selected_data, fields, reset_pd)
-                    print(f"DEBUG: Injection result: {injection_result}")
+                    logger.info(f"DEBUG: Injection result: {injection_result}")
                     
                     if injection_result:
                         # Success - just update statistics without showing a message
                         # as the calling function will display a success message
-                        print("DEBUG: Injection successful, updating statistics")
+                        logger.info("DEBUG: Injection successful, updating statistics")
                         try:
                             update_statistics(num_features, feature_types)
-                            print("DEBUG: Statistics updated successfully")
+                            logger.info("DEBUG: Statistics updated successfully")
                         except Exception as e:
-                            print(f"DEBUG: Error updating statistics: {e}")
+                            logger.error(f"DEBUG: Error updating statistics: {e}")
                     
                         # Clean up temporary files after successful operation
-                        print("DEBUG: Cleaning up temporary files")
+                        logger.info("DEBUG: Cleaning up temporary files")
                         try:
                             injector.cleanup_temp_files(Obj_Num)
-                            print("DEBUG: Temporary files cleaned up")
+                            logger.info("DEBUG: Temporary files cleaned up")
                         except Exception as e:
-                            print(f"DEBUG: Error cleaning up temporary files: {e}")
+                            logger.error(f"DEBUG: Error cleaning up temporary files: {e}")
                         
                         # Don't create files in the Generated folder for successful BMS injections
-                        print("DEBUG: Returning feature entries, BMS injection completed successfully")
+                        logger.info("DEBUG: Returning feature entries, BMS injection completed successfully")
                         return feature_entries
                     else:
-                        print("DEBUG: Injection failed")
+                        logger.info("DEBUG: Injection failed")
                 except Exception as e:
-                    print(f"DEBUG: Error during injection: {e}")
+                    logger.error(f"DEBUG: Error during injection: {e}")
                     import traceback
-                    print(f"DEBUG: Traceback: {traceback.format_exc()}")
+                    logger.error(f"DEBUG: Traceback: {traceback.format_exc()}")
                     raise
                 else:
                     messagebox.showerror(
@@ -1482,6 +1498,7 @@ def Save_accurate_features(
     sort_option,
     floor_height,
     num_floors,
+    shared_data_dict,  # Added shared_data_dict parameter
     CT_Num=None,
     Obj_Num=None,
 ):
@@ -1577,15 +1594,35 @@ def Save_accurate_features(
             import tkinter as tk
             from tkinter import messagebox
             
-            # Get BMS path from shared_data CTpath if available
-            if 'shared_data' in globals() and 'CTpath' in shared_data and shared_data["CTpath"].get():
-                bms_path = os.path.dirname(shared_data["CTpath"].get())
+            # Get BMS path from shared_data_dict CTpath if available
+            if shared_data_dict and 'CTpath' in shared_data_dict and shared_data_dict["CTpath"].get():
+                bms_path = os.path.dirname(shared_data_dict["CTpath"].get())
             else:
                 # Fall back to SavePath parent directory
                 bms_path = Path(SavePath).parent
             
-            # Create BMS injector instance
-            injector = BmsInjector(bms_path)
+            # Get backup setting from shared_data if available
+            # Get backup setting from shared_data_dict if available
+            backup_bms_files = False  # Default to True for safety
+            if shared_data_dict and 'backup_bms_files' in shared_data_dict:
+                # Make sure to handle if shared_data_dict['backup_bms_files'] is already a boolean
+                backup_setting = shared_data_dict['backup_bms_files']
+                if isinstance(backup_setting, tk.StringVar): # Check if it's a Tkinter StringVar
+                    backup_value = backup_setting.get()
+                    backup_bms_files = backup_value == '1'
+                elif isinstance(backup_setting, str): # Check if it's a plain string '0' or '1'
+                    backup_bms_files = backup_setting == '1'
+                elif isinstance(backup_setting, bool): # Check if it's already a boolean
+                    backup_bms_files = backup_setting
+                else:
+                    logger.warning(f"Unknown type for backup_bms_files in shared_data_dict (Save_accurate_features): {type(backup_setting)}. Defaulting to False.")
+                    backup_bms_files = False # Default to true if type is unexpected
+                logger.info(f"BMS file backup {'enabled' if backup_bms_files else 'disabled'}")
+            else:
+                logger.warning("shared_data_dict or 'backup_bms_files' not found in Save_accurate_features. Defaulting to backup_bms_files=False")
+            
+            # Create BMS injector instance with appropriate backup setting
+            injector = BmsInjector(bms_path, backup=backup_bms_files)
             
             # Check if CT is an objective
             is_objective = injector.is_objective_ct(CT_Num)
@@ -1624,7 +1661,7 @@ def Save_accurate_features(
                     
                     # Check if we have saved settings for this CT/Obj combination
                     if saved_settings and saved_settings.get("ct_num") == CT_Num and saved_settings.get("obj_num") == Obj_Num:
-                        print(f"Found settings for CT:{CT_Num} Obj:{Obj_Num}")
+                        logger.info(f"Found settings for CT:{CT_Num} Obj:{Obj_Num}")
                         obj_type = saved_settings.get("type")
                         name = saved_settings.get("name")
                         reset_pd = saved_settings.get("reset_pd", True)
@@ -1644,9 +1681,8 @@ def Save_accurate_features(
                                 typed_fields[field_name] = value
                                 
                         fields = typed_fields
-                        print(f"Using saved settings: type={obj_type}, name={name}, reset_pd={reset_pd}")
+                        logger.info(f"Using saved settings: type={obj_type}, name={name}, reset_pd={reset_pd}")
                     else:
-                        print(f"No matching previous settings found")
                         logger.error(f"No saved settings found for CT:{CT_Num} Obj:{Obj_Num}")
                         messagebox.showerror(
                             "Missing Configuration",
@@ -1657,7 +1693,6 @@ def Save_accurate_features(
                         return None
                 except Exception as e:
                     error_msg = f"Error loading saved settings: {e}"
-                    print(error_msg)
                     logger.error(error_msg)
                     messagebox.showerror(
                         "Error",
@@ -1671,8 +1706,7 @@ def Save_accurate_features(
                 root.destroy()
                         
                 # Update injector with new path if changed
-                if bms_path != str(injector.bms_path):
-                    injector = BmsInjector(bms_path)
+                injector = BmsInjector(bms_path, backup=backup_bms_files)
                 
                 # Create objective and inject features in one operation
                 if injector.create_and_inject_objective(Obj_Num, CT_Num, name, obj_type, feature_entries, AllBMSModels, fields, reset_pd):
@@ -1840,12 +1874,12 @@ def format_entry(
         formatted_value = f"{value_int:04d}"
         
         # Show the value transformation for debugging
-        print(f"DEBUG: Feature CT {ct_number} ({feature_name}) - value {value} formatted to '{formatted_value}'")
+        logger.debug(f"Feature CT {ct_number} ({feature_name}) - value {value} formatted to '{formatted_value}'")
         logger.info(f"Feature value for CT {ct_number} ({feature_name}): {value} -> {formatted_value}")
     except (ValueError, TypeError) as e:
         # No defaults - if we can't format the value, it's an error
         error_msg = f"Error formatting value '{value}' for feature {feature_name}: {e}"
-        print(f"ERROR: {error_msg}")
+        logger.error(error_msg)
         logger.error(error_msg)
         raise ValueError(error_msg)
     
@@ -1959,7 +1993,6 @@ def save_statistics(stats):
         # Now save using save_json without the default parameter
         save_json(JsonFiles.FEATURE_STATISTICS, json_compatible_stats)
     except Exception as e:
-        print(f"Error saving statistics: {e}")
         logger.error(f"Error saving statistics: {e}")
 
 

@@ -18,11 +18,13 @@ import traceback
 import math
 import logging
 from utils.json_path_handler import load_json, save_json, JsonFiles, get_json_path
+# Import enhanced settings window
+from components.settings_window import SettingsWindow
 
 # functions from Code
 import OSMLegend
 import Restrictions
-import InternalConsole
+from components.internal_console import show_console
 import ValuesDictionary
 import Load_Geo_File as geo
 from MainCode import Load_Db
@@ -51,7 +53,10 @@ class MainPage(tk.Tk):
         style = ttk.Style()
         style.configure("Treeview.Heading", font=('Arial', 10, 'bold'))
         
-        # Set Shared data vatiables
+        # Set up application logging
+        self._configure_application_logging()
+
+        # Set Shared data variables
         self.shared_data = {
             "CTpath": tk.StringVar(),
             "BMS_Database_Path": tk.StringVar(),
@@ -68,7 +73,9 @@ class MainPage(tk.Tk):
             "projection_path": tk.StringVar(),
             "projection_string": tk.StringVar(),
             "Startup": tk.StringVar(),
-            "debugger": tk.BooleanVar(),
+            "log_level": tk.StringVar(),  # Replaces debugger with log level
+            "logging_method": tk.StringVar(), # For logging handler (Console, File, Both)
+            "BuildingGeneratorVer": tk.StringVar(),
         }
         self.shared_data["BMS_version"].set("-")
         self.shared_data["Theater"].set("-")
@@ -76,7 +83,11 @@ class MainPage(tk.Tk):
         self.shared_data["projection_path"].set("No Projection file selected")
         self.shared_data["backup_CTpath"].set("No CT file selected")
         self.shared_data["Geopath"].set("No GeoJson file selected")
-        self.shared_data["debugger"] = False
+        self.shared_data["log_level"].set("INFO")  # Default log level
+        self.shared_data["logging_method"].set("Console") # Default logging_method
+        
+        # Initialize Auto_Load attribute for settings window integration
+        self.Auto_Load = tk.BooleanVar(value=False)
 
         self.frames = {}
         for F in (DashboardPage, DatabasePage, GeoDataPage, OperationPage):
@@ -88,8 +99,9 @@ class MainPage(tk.Tk):
             self.grid_columnconfigure(0, weight=1)
             frame.grid(row=0, column=0, sticky="nsew")
 
-        # Set Name and Icon
-        self.title("Building Generator v1.2")
+        # Set Name and Icon and version
+        self.shared_data["BuildingGeneratorVer"].set("Building Generator v1.4")
+        self.title(self.shared_data["BuildingGeneratorVer"].get())
         self.iconbitmap("Assets/icon_128.ico")
 
         # Select Dash as main front page
@@ -104,6 +116,56 @@ class MainPage(tk.Tk):
         # Show the selected frame
         frame = self.frames[page_name]
         frame.grid()
+        
+    def _configure_application_logging(self):
+        """Configure the application-wide logging system.
+        
+        This method sets up proper logging for the entire application, replacing
+        the old debugger toggle with a comprehensive logging system that supports
+        different log levels and multiple output destinations.
+        """
+        # Create logs directory if it doesn't exist
+        logs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+        os.makedirs(logs_dir, exist_ok=True)
+        
+        # Configure the root logger to affect all loggers in the application
+        root_logger = logging.getLogger()
+        root_logger.setLevel(logging.INFO)  # Default level
+        
+        # Remove any existing handlers to avoid duplicates
+        for handler in root_logger.handlers[:]:
+            root_logger.removeHandler(handler)
+            
+        # Create formatter for consistent log messages
+        formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        
+        # Add console handler
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        console_handler.setLevel(logging.INFO)
+        root_logger.addHandler(console_handler)
+        
+        # Add file handler for persistent logs
+        file_handler = logging.FileHandler(
+            os.path.join(logs_dir, "building_generator.log")
+        )
+        file_handler.setFormatter(formatter)
+        file_handler.setLevel(logging.INFO)
+        root_logger.addHandler(file_handler)
+        
+        # Configure all imported modules to use this logger configuration
+        for name in ['Load_Geo_File', 'objective_cache', 'Database', 'MainCode', 'OSMLegend', 'ValuesDictionary']:
+            module_logger = logging.getLogger(name)
+            module_logger.setLevel(logging.INFO)
+            # Module loggers inherit handlers from the root logger, so no need to add handlers
+        
+        # Log application startup
+        logger = logging.getLogger(__name__)
+        logger.info("Building Generator application starting")
+        logger.info(f"Log directory: {logs_dir}")
 
     def SelectCTfile(self, event):
         # open a file dialog and update the label text with the selected file path
@@ -142,184 +204,147 @@ class MainPage(tk.Tk):
                     self.frames["DatabasePage"].ModelsTable.delete(row)
 
     def SettingWindow(self):
-        Settings = tk.Toplevel(self)
-        Settings.resizable(False, False)
-        Settings.title("Settings")
-        Settings.geometry("400x150")
+        """Open the enhanced settings window with tabbed interface.
+        
+        This method creates an instance of the enhanced SettingsWindow class from
+        components/settings_window.py, which provides a modern tabbed interface
+        with comprehensive configuration options including full support for the
+        Value field in FED XML entries.
+        """
+        # Disable settings buttons while window is open
         self.disable_Settings_buttons()
-
-        # Create a frame for better organization
-        frame = tk.Frame(Settings, bg="#E7F3F7")
-        frame.pack(fill="both", expand=True, padx=10, pady=10)
-
-        # Create buttons row
-        button_frame = tk.Frame(frame, bg="#E7F3F7")
-        button_frame.pack(fill="x", pady=5)
-
-        self.SaveSettings = Ctk.CTkButton(
-            button_frame,
-            text="Save Preset",
-            fg_color="#A1B9D0",
-            height=33,
-            width=167,
-            corner_radius=5,
-            hover_color="#7A92A9",
-            command=self.save_config_file,
-            text_color="#000000",
+        
+        # Create the enhanced settings window
+        # Pass self (MainPage) as parent to provide access to shared_data and methods
+        # Pass all relevant paths to the settings window
+        ct_path = self.shared_data["CTpath"].get()
+        backup_kto_path = self.shared_data["backup_CTpath"].get()
+        database_path = self.shared_data["BMS_Database_Path"].get()
+        geojson_path = self.shared_data["Geopath"].get()
+        editor_path = self.shared_data["EditorSavingPath"].get() if "EditorSavingPath" in self.shared_data else ""
+        
+        # Create settings window with all paths
+        settings_window = SettingsWindow(
+            self, 
+            bms_path=ct_path, 
+            kto_backup_path=backup_kto_path,
+            database_path=database_path,
+            geojson_path=geojson_path,
+            editor_extraction_path=editor_path
         )
-        self.SaveSettings.pack(side="left", padx=5)
+        
+        # Ensure Auto-Start checkbox state matches shared data
+        startup_value = self.shared_data["Startup"].get()
+        # Set our own Auto_Load value based on the Startup shared data
+        self.Auto_Load.set(startup_value == "1")
+        
+        # Update the auto_start_var in settings window to match
+        if hasattr(settings_window, 'auto_start_var'):
+            settings_window.auto_start_var.set(startup_value == "1")
+        
+        # Bind the window's "destroy" event to re-enable settings button
+        settings_window.bind("<Destroy>", self.enable_Settings_button)
+        
+        return settings_window
 
-        self.LoadSettings = Ctk.CTkButton(
-            button_frame,
-            text="Load Preset",
-            fg_color="#A1B9D0",
-            height=33,
-            width=167,
-            corner_radius=5,
-            hover_color="#7A92A9",
-            text_color="#000000",
-            command=self.load_config,
+    def update_logging_config(self, level='INFO', handlers=None):
+        """Update the application logging configuration.
+        
+        This method configures the logging system with specified level and handlers.
+        
+        Args:
+            level (str): The logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+            handlers (list): List of handler types to use ('console', 'file')
+        """
+        if handlers is None:
+            handlers = ['console']
+            
+        # Update the log level in shared data for other components to access
+        self.shared_data["log_level"].set(level)
+        
+        # Configure the root logger
+        root_logger = logging.getLogger()
+        numeric_level = getattr(logging, level)
+        root_logger.setLevel(numeric_level)
+        
+        # Remove existing handlers
+        for handler in root_logger.handlers[:]:
+            root_logger.removeHandler(handler)
+            
+        # Create formatter
+        formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
         )
-        self.LoadSettings.pack(side="left", padx=5)
-
-        # Create checkboxes row
-        checkbox_frame = tk.Frame(frame, bg="#E7F3F7")
-        checkbox_frame.pack(fill="x", pady=5)
-
-        self.Auto_Load = Ctk.CTkCheckBox(
-            checkbox_frame,
-            checkbox_height=18,
-            checkbox_width=18,
-            text="Startup",
-            onvalue=True,
-            offvalue=False,
-            text_color="#565454",
-            width=30,
-            command=self.startup_selection_checkbox,
-            fg_color="#8DBBE7",
-        )
-        self.Auto_Load.pack(side="left", padx=5)
-
-        self.debbuger = Ctk.CTkCheckBox(
-            checkbox_frame,
-            checkbox_height=18,
-            checkbox_width=18,
-            text="Debbuger",
-            onvalue=True,
-            offvalue=False,
-            text_color="#565454",
-            width=30,
-            command=self.change_debugger_state,
-            fg_color="#8DBBE7",
-        )
-        self.debbuger.pack(side="left", padx=5)
-
-        # Create console button row
-        console_frame = tk.Frame(frame, bg="#E7F3F7")
-        console_frame.pack(fill="x", pady=5)
-
-        self.console_window = Ctk.CTkButton(
-            console_frame,
-            text="Open Console Window",
-            fg_color="#A1B9D0",
-            height=33,
-            width=354,
-            corner_radius=5,
-            hover_color="#7A92A9",
-            text_color="#000000",
-            command=self.open_console_window,
-        )
-        self.console_window.pack(fill="x", padx=5)
-
-        # Set Startup state based on the shared data value
-        if self.shared_data["Startup"].get():
-            self.Auto_Load.select()
-        else:
-            self.Auto_Load.deselect()
-
-        # Bind the window's "destroy" event to a function that enables the button
-        Settings.bind("<Destroy>", self.enable_Settings_button)
-
-    def change_debugger_state(self):
-        debugger_value = self.debbuger.get()
-        if debugger_value:
-            print("Debugger Activated")
-            self.shared_data["debugger"] = True
-        elif not debugger_value:
-            print("Debugger Deactivated")
-            self.shared_data["debugger"] = False
+        
+        # Add requested handlers
+        if 'console' in handlers:
+            console_handler = logging.StreamHandler()
+            console_handler.setLevel(numeric_level)
+            console_handler.setFormatter(formatter)
+            root_logger.addHandler(console_handler)
+            
+        if 'file' in handlers:
+            # Ensure logs directory exists
+            logs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+            os.makedirs(logs_dir, exist_ok=True)
+            
+            # Create file handler
+            log_file = os.path.join(logs_dir, "building_generator.log")
+            file_handler = logging.FileHandler(log_file)
+            file_handler.setLevel(numeric_level)
+            file_handler.setFormatter(formatter)
+            root_logger.addHandler(file_handler)
+        
+        # Update levels for known module loggers as well
+        for name in ['Load_Geo_File', 'objective_cache', 'Database', 'MainCode', 'OSMLegend', 'ValuesDictionary']:
+            module_logger = logging.getLogger(name)
+            module_logger.setLevel(numeric_level)
+            
+        # Log the configuration change
+        logger = logging.getLogger(__name__)
+        logger.info(f"Logging configuration updated: level={level}, handlers={handlers}")
 
     def open_console_window(self):
-        """Opens a new console window"""
-        InternalConsole.InternalConsole()
+        """Opens a new console window or brings existing one to front"""
+        show_console(self)
 
     def startup_selection_checkbox(self):
-        """Change of checkbox in the settings window will set values to the shared value of startup
-        It will load the config file, and change the value on the fly"""
-
-        # Load or create Config file
-        filename, filepath = "config.json", Path(r"config.json")
+        """Update the Auto-Start setting when the checkbox is toggled in the settings window.
         
-        # If config doesn't exist, save current settings first
-        if not os.path.isfile(filepath):
-            settings = {
-                "Startup": self.shared_data["Startup"].get(),
-                "CT_path": self.shared_data["CTpath"].get(),
-                "BMS_Database_Path": self.shared_data["BMS_Database_Path"].get(),
-                "Theater": self.shared_data["Theater"].get(),
-                "BMS_version": self.shared_data["BMS_version"].get(),
-                "Geopath": self.shared_data["Geopath"].get(),
-                "backup_CTpath": self.shared_data["backup_CTpath"].get(),
-                "EditorSavingPath": self.shared_data["EditorSavingPath"].get(),
-                "Database_Availability": self.shared_data["Database_Availability"].get(),
-                "projection_path": self.shared_data["projection_path"].get(),
-                "projection_string": self.shared_data["projection_string"].get(),
-                "restriction_box": self.frames["OperationPage"].restriction_box.get("0.0", "end"),
-                "textbox_Radius_random": self.frames["OperationPage"].textbox_Radius_random.get(),
-                "textbox_Amount_random": self.frames["OperationPage"].textbox_Amount_random.get(),
-                "textbox_Values_random1": self.frames["OperationPage"].textbox_Values_random1.get(),
-                "textbox_Values_random2": self.frames["OperationPage"].textbox_Values_random2.get(),
-                "switch_Presence_random": self.frames["OperationPage"].switch_Presence_random.get(),
-                "textbox_Presence_random1": self.frames["OperationPage"].textbox_Presence_random1.get(),
-                "textbox_Presence_random2": self.frames["OperationPage"].textbox_Presence_random2.get(),
-                "Fillter_optionmenu": self.frames["OperationPage"].Fillter_optionmenu.get(),
-                "values_geo_optionmenu": self.frames["OperationPage"].values_geo_optionmenu.get(),
-                "values_rand_optionmenu": self.frames["OperationPage"].values_rand_optionmenu.get(),
-                "Selection_optionmenu": self.frames["OperationPage"].Selection_optionmenu.get(),
-                "Auto_features_detector": self.frames["OperationPage"].Auto_features_detector.get(),
-                "textbox_Amount_geo": self.frames["OperationPage"].textbox_Amount_geo.get(),
-                "textbox_Values_geo1": self.frames["OperationPage"].textbox_Values_geo1.get(),
-                "textbox_Values_geo2": self.frames["OperationPage"].textbox_Values_geo2.get(),
-                "switch_Presence_geo": self.frames["OperationPage"].switch_Presence_geo.get(),
-                "textbox_Presence_geo1": self.frames["OperationPage"].textbox_Presence_geo1.get(),
-                "textbox_Presence_geo2": self.frames["OperationPage"].textbox_Presence_geo2.get(),
-                "segemented_button": self.frames["OperationPage"].segemented_button.get(),
-                "segemented_button_Saving": self.frames["OperationPage"].segemented_button_Saving.get(),
-                "segemented_button_graphing1": self.frames["OperationPage"].segemented_button_graphing1.get(),
-                "segemented_button_graphing2": self.frames["OperationPage"].segemented_button_graphing2.get(),
-                "Editor_Extraction_name": self.frames["OperationPage"].Editor_Extraction_name.get(),
-                "floor_deviation_entry": self.frames["OperationPage"].floor_deviation_entry.get(),
-                "textbox_floor_height": self.frames["GeoDataPage"].textbox_floor_height.get(),
-                "sorting_saving": self.frames["OperationPage"].sorting_saving.get(),
-            }
-            with open(filename, "w") as f:
-                json.dump(settings, f)
-
-        # Now load the config file
-        with open(filename, "r") as f:
-            loaded_data = json.load(f)
-
-        # Set Startup state based on the shared data value
-        if self.Auto_Load.get():
-            self.shared_data["Startup"].set(True)
-            loaded_data["Startup"] = self.shared_data["Startup"].get()
-            with open(filename, "w") as f:
-                json.dump(loaded_data, f)
-        else:
-            self.shared_data["Startup"].set(False)
-            loaded_data["Startup"] = self.shared_data["Startup"].get()
-            with open(filename, "w") as f:
-                json.dump(loaded_data, f)
+        This method only updates the config file if it exists, and uses json_path_handler.
+        It doesn't create a new config file if one doesn't exist.
+        """
+        try:
+            # Log the current state for debugging
+            logging.info(f"Auto-Start checkbox toggled. New state: {self.Auto_Load.get()}")
+            
+            # Load the existing config file using json_path_handler
+            config_data = load_json(JsonFiles.CONFIG_JSON, default=None)
+            
+            # Only proceed if we have a valid config file - don't create one if it doesn't exist
+            if config_data:
+                # Set Startup value based on the Auto_Load checkbox state
+                startup_value = "1" if self.Auto_Load.get() else "0"
+                
+                # Update both the shared_data and config_data
+                self.shared_data["Startup"].set(startup_value)
+                config_data["Startup"] = startup_value
+                
+                # Save the updated config file using json_path_handler
+                if save_json(JsonFiles.CONFIG_JSON, config_data):
+                    logging.info(f"Successfully saved config.json with Startup={startup_value}")
+                else:
+                    logging.error("Failed to save config.json")
+            else:
+                # Config file doesn't exist, just update the shared_data
+                startup_value = "1" if self.Auto_Load.get() else "0"
+                self.shared_data["Startup"].set(startup_value)
+                logging.info("No config file found, only updated shared_data")
+            
+        except Exception as e:
+            logging.error(f"Error in startup_selection_checkbox: {str(e)}")
+            logging.error(traceback.format_exc())
 
     def enable_Settings_button(self, event):
         # Enable the settings button in all pages
@@ -347,6 +372,10 @@ class MainPage(tk.Tk):
                 "Database_Availability": self.shared_data["Database_Availability"].get(),
                 "projection_path": self.shared_data["projection_path"].get(),
                 "projection_string": self.shared_data["projection_string"].get(),
+                "backup_bms_files": self.shared_data['backup_bms_files'].get() if isinstance(self.shared_data.get('backup_bms_files'), tk.StringVar) else '1',
+                "backup_features_files": self.shared_data['backup_features_files'].get() if isinstance(self.shared_data.get('backup_features_files'), tk.StringVar) else '1',
+                "log_level": self.shared_data["log_level"].get(),
+                "logging_method": self.shared_data["logging_method"].get(),
                 "restriction_box": self.frames["OperationPage"].restriction_box.get("0.0", "end"),
                 "textbox_Radius_random": self.frames["OperationPage"].textbox_Radius_random.get(),
                 "textbox_Amount_random": self.frames["OperationPage"].textbox_Amount_random.get(),
@@ -434,6 +463,10 @@ class MainPage(tk.Tk):
             self.shared_data["Database_Availability"].set(loaded_data.get("Database_Availability", ""))
             self.shared_data["projection_path"].set(loaded_data.get("projection_path", ""))
             self.shared_data["projection_string"].set(loaded_data.get("projection_string", ""))
+            self.shared_data['backup_bms_files'] = loaded_data.get('backup_bms_files', '0') # Default to '0' (False)
+            self.shared_data['backup_features_files'] = loaded_data.get('backup_features_files', '0') # Default to '0' (False)
+            self.shared_data["log_level"].set(loaded_data.get("log_level", "INFO"))
+            self.shared_data["logging_method"].set(loaded_data.get("logging_method", "Console"))
             
             # Set dropdown and segmented button values
             self.frames["OperationPage"].Fillter_optionmenu.set(loaded_data.get("Fillter_optionmenu", ""))
@@ -556,14 +589,34 @@ class MainPage(tk.Tk):
                 messagebox.showerror("Loading Error", f"An error occurred while loading configuration: {str(e)}")
 
     def startup_definition(self):
-        """Check if startup configuration exists in the config file, and apply it if it does"""
+        """Check if startup configuration exists in the config file, and apply it if it does
+        
+        This method only loads the config if the config file exists and has 'Startup' set to '1'
+        """
         try:
             # Use json_path_handler to read from data_components folder
             config_data = load_json(JsonFiles.CONFIG_JSON, default=None)
             
-            # If config exists and startup is enabled, load the configuration silently (without messages)
-            if config_data and config_data.get("Startup") == "1":
+            # Skip if no config data found
+            if not config_data:
+                logging.info("No config data found. Skipping startup configuration.")
+                return
+                
+            # Get the Startup value from config
+            startup_value = config_data.get("Startup", "0")  # Default to '0' if not found
+            
+            # Update shared data with the startup value
+            self.shared_data["Startup"].set(startup_value)
+            
+            # Update Auto_Load to match the Startup value from config
+            self.Auto_Load.set(startup_value == "1")
+            
+            # Only load config if Startup is '1'
+            if startup_value == "1":
+                logging.info("Auto-start is enabled. Loading configuration...")
                 self.load_config(show_message=False)
+            else:
+                logging.info("Auto-start is disabled. Not loading configuration at startup.")
                 
         except Exception as e:
             # Log the error but don't show a message box as this happens at startup
@@ -1046,6 +1099,7 @@ class DashboardPage(tk.Frame):
         return BMS_paths
 
     def load_statistics_for_chart(self):
+        logger = logging.getLogger(__name__)
         try:
             # Get the path to feature_statistics.json.gz in the data_components folder
             stats_path = get_json_path(JsonFiles.FEATURE_STATISTICS)
@@ -1158,7 +1212,7 @@ class DashboardPage(tk.Frame):
 
             return labels, sizes, total_features, total_usage
         except (FileNotFoundError, json.JSONDecodeError, ValueError) as e:
-            print(f"Error loading statistics: {e}")
+            logger.error(f"Error loading statistics: {e}")
             # Return default data if file not found, invalid, or conversion fails
             return (
                 ["No Data", "No Data", "No Data", "No Data", "Other"],
@@ -1877,11 +1931,15 @@ class DatabasePage(tk.Frame):
             )
 
     def GenerateDatabase(self):
-        """Function takes the chosen theater and BMS version and check if database is already exising
+        """Function takes the chosen theater and BMS version and check if database is already existing
         if not, it will create folders with the relevant path and place the new database there"""
+        # Create a logger for this function
+        logger = logging.getLogger(__name__)
+        
         if self.controller.shared_data["CTpath"].get() == "No CT file selected":
+            logger.warning("Database generation aborted: No CT file selected")
             return messagebox.showwarning(
-                "Procedure Aborted", "Class Table XML has'nt been selected."
+                "Procedure Aborted", "Class Table XML has not been selected."
             )
 
         # Check version and theater of XML base folder
@@ -1901,51 +1959,66 @@ class DatabasePage(tk.Frame):
         backup_CT_path = self.controller.shared_data["backup_CTpath"].get()
         db_path = os.path.join(ownPath, "Database", BMSVer, Theater, "database.db")
         db_save_path = os.path.join(ownPath, "Database", BMSVer, Theater)
+        
         # Import the processing window functionality
         from processing_window import run_with_processing
         
-        # Gather all needed parameters first
+        # Gather all needed parameters
         CT_path = self.controller.shared_data["CTpath"].get()
-        debugger_state = self.controller.shared_data["debugger"]
         
         # If db is detected in the detected folder, ask if you want to rewrite BEFORE starting the processing window
         if os.path.isfile(db_path):
+            logger.info(f"Existing database found at {db_path}")
             result = messagebox.askyesno(
                 "Warning", "Suited Database has been found. Do you want to override it?"
             )
             if not result:
+                logger.info("User chose not to override existing database")
                 messagebox.showwarning(
                     "Procedure Aborted", "The Database generating has been aborted."
                 )
                 return
+            logger.info("User chose to override existing database")
                 
         try:
             # Define the database generation task that will run in the background thread
             def database_task(processing_window):
                 try:
-                    # Update the message to show what's happening
-                    processing_window.update_message("Extracting data from CT XML file...")
+                    # Log action with appropriate logger
+                    logger.info("Starting database generation process")
+                    logger.info(f"Using CT path: {CT_path}")
+                    logger.info(f"Using backup CT path: {backup_CT_path}")
+                    logger.info(f"Saving to: {db_save_path}")
                     
-                    # Call the GenerateDB function
-                    GenerateDB(CT_path, db_save_path, debugger_state, backup_CT_path)
+                    # Call the GenerateDB function - logging is configured at application level
+                    GenerateDB(CT_path, db_save_path, backup_CT_path)
                     
                     # Return success
+                    logger.info("Database generation completed successfully")
                     return True
                 except Exception as e:
                     import traceback
                     error_details = traceback.format_exc()
-                    logging.getLogger(__name__).error(f"Database generation error: {error_details}")
+                    logger.error(f"Database generation error: {str(e)}")
+                    logger.debug(f"Error details: {error_details}")
                     raise
             
             # Run the database task with a processing window
-            run_with_processing(
+            logger.info("Launching database generation with processing window")
+            result = run_with_processing(
                 parent=self.controller,
                 task_function=database_task,
                 title="Generating Database",
                 message="Initializing database generation..."
             )
             
+            # Check if the result is valid
+            if result is None or result is False:
+                logger.error(f"Invalid result from database generation: {result}")
+                return messagebox.showerror("Error", "Failed to generate database. Check the logs for details.")
+            
             # Update the UI after successful completion
+            logger.info("Updating UI with new database information")
             self.NewDBupdate()
             self.Udpate_existedDB_Tables()
             
@@ -1954,6 +2027,7 @@ class DatabasePage(tk.Frame):
             )
             
         except Exception as e:
+            logger.error(f"Database generation failed with error: {str(e)}")
             messagebox.showwarning("Procedure Aborted", f"Error has occurred: {str(e)}")
 
 
@@ -2669,11 +2743,17 @@ class GeoDataPage(tk.Frame):
             return True  # Content is not a valid float
             
     def CalculateGeo(self):
-        """will get Geo-Json file and If the file is valid, The box will be updated with the path string, and the structures list
+        """Will get Geo-Json file and if the file is valid, the box will be updated with the path string, and the structures list
         will be updated into the table in the page"""
+        # Create a logger for this function
+        logger = logging.getLogger(__name__)
+        logger.info("Starting GeoJSON calculation process")
+        
         try:
             file_path = self.controller.shared_data["Geopath"].get()
+            logger.info(f"Using GeoJSON file: {file_path}")
         except ValueError:
+            logger.error("GeoJson path is invalid")
             return messagebox.showerror("Error", "GeoJson path is invalid")
 
         # Import the processing window functionality
@@ -2685,54 +2765,43 @@ class GeoDataPage(tk.Frame):
             and self.controller.shared_data["projection_string"].get() != ""
         )
         projection_string = self.controller.shared_data["projection_string"].get() if has_projection else None
-        debugger_state = self.controller.shared_data["debugger"]
+        
+        # Application logging is already configured globally, no need to pass log level to functions
         
         # Check if floor height is available
         has_floor_height = not self.is_floor_height_not_valid(self.textbox_floor_height) if hasattr(self, 'textbox_floor_height') else False
         floor_height = float(self.textbox_floor_height.get()) if has_floor_height else None
         
+        # Log configuration settings
+        logger.info(f"Projection available: {has_projection}")
+        if has_projection:
+            logger.info(f"Using projection string: {projection_string}")
+        logger.info(f"Floor height available: {has_floor_height}")
+        if has_floor_height:
+            logger.info(f"Using floor height: {floor_height} feet")
+        
         # Define the GeoJSON loading task that will run in the background thread
         def load_geojson_task(processing_window):
             try:
-                # Update the message to show loading is in progress
-                processing_window.update_message("Loading GeoJSON file...")
+                # Log action to application logs instead of print statements
+                logger.info("Loading GeoJSON file...")
                 
-                # Prepare arguments based on what's available
-                if has_projection:
-                    processing_window.update_message("Applying projection to GeoJSON data...")
-                    if has_floor_height:
-                        # Call with projection string and floor height
-                        result = geo.Load_Geo_File(
-                            file_path,
-                            debugger_state,
-                            projection_string,
-                            floor_height
-                        )
-                    else:
-                        # Call with projection string only
-                        result = geo.Load_Geo_File(
-                            file_path, 
-                            debugger_state, 
-                            projection_string
-                        )
-                else:
-                    # Call without projection string with floor height
-                    if has_floor_height:
-                        result = geo.Load_Geo_File(
-                            file_path, 
-                            debugger_state,
-                            None,
-                            floor_height
-                        )
-                    else:
-                        # Call without projection string and floor height
-                        result = geo.Load_Geo_File(
-                            file_path, 
-                            debugger_state
-                        )
+                # Prepare arguments for geo.Load_Geo_File with signature (json_path, projection_string, floor_height)
+                args_for_load_geo = [file_path] # file_path
+
+                # Add projection_string (it's None if not available, which matches the default in Load_Geo_File)
+                args_for_load_geo.append(projection_string)
+
+                # Add floor_height if available, otherwise Load_Geo_File will use its default
+                if has_floor_height:
+                    args_for_load_geo.append(floor_height)
+                # If not has_floor_height, we don't append, relying on default in Load_Geo_File
+
+                logger.info(f"Calling geo.Load_Geo_File with args: {args_for_load_geo}")
+                result = geo.Load_Geo_File(*args_for_load_geo)
                     
-                # Update message for processing features
-                processing_window.update_message("Processing GeoJSON features...")
+                # Log processing features message
+                logger.info("Processing GeoJSON features...")
                 
                 # Return the results
                 return result
@@ -2740,11 +2809,13 @@ class GeoDataPage(tk.Frame):
             except Exception as e:
                 import traceback
                 error_details = traceback.format_exc()
-                logging.getLogger(__name__).error(f"GeoJSON loading error: {error_details}")
+                logger.error(f"GeoJSON loading error: {str(e)}")
+                logger.debug(f"Error details: {error_details}")
                 raise ValueError("Projection string or GeoJson path are not valid")
         
         try:
             # Run the GeoJSON loading task with a processing window
+            logger.info("Launching GeoJSON loading with processing window")
             result = run_with_processing(
                 parent=self.controller,
                 task_function=load_geojson_task,
@@ -2752,6 +2823,10 @@ class GeoDataPage(tk.Frame):
                 message="Initializing GeoJSON loading..."
             )
             
+            # Check if result is valid (not None or False)
+            if not result or not isinstance(result, tuple) or len(result) != 3:
+                logger.error(f"Invalid result from GeoJSON loading: {result}")
+                return messagebox.showerror("Error", "Failed to load GeoJSON data. Check the logs for details.")            
             # Unpack the results
             GeoFeatures, CalcData_GeoFeatures, AOI_center = result
             
@@ -2807,7 +2882,22 @@ class GeoDataPage(tk.Frame):
             import traceback
             error_details = traceback.format_exc()
             logging.getLogger(__name__).error(f"Unexpected error during GeoJSON loading: {error_details}")
-            return messagebox.showerror("Error", f"An unexpected error occurred: {str(e)}")
+            
+            # Provide a more user-friendly error message
+            error_msg = "Failed to load GeoJSON data"
+            
+            # Check specific error types to give more helpful messages
+            if "TypeError: cannot unpack" in str(e):
+                error_msg = "Processing error: Could not parse GeoJSON data structure. Check the file format."
+            elif "ValueError: Projection string" in str(e):
+                error_msg = "Invalid projection string or GeoJSON path."
+            elif "FileNotFoundError" in error_details:
+                error_msg = "GeoJSON file not found. Check the file path."
+            else:
+                error_msg = f"{error_msg}: {str(e)}"
+                
+            # Show error message to user
+            messagebox.showerror("Error", error_msg)
 
     def clean_data_for_display(self, data_list):
         """Cleans data values for display in the GeoTable
@@ -2874,6 +2964,7 @@ class GeoDataPage(tk.Frame):
 
     def SelectGeoJsonFile(self, event):
         """Clicking on Geo box will open dialog which will allow to select"""
+        logger = logging.getLogger(__name__)
 
         try:
             # open a file dialog and update the label text with the selected file path
@@ -2889,7 +2980,7 @@ class GeoDataPage(tk.Frame):
         except Exception as e:
             # Handle any potential errors during file selection
             self.controller.shared_data["Geopath"].set("No GeoJSON file selected")
-            print(f"Error during file selection: {e}")
+            logger.error(f"Error during file selection: {e}")
             if hasattr(self.controller, "debugger") and self.controller.debugger:
                 traceback.print_exc()
 
@@ -2897,7 +2988,7 @@ class GeoDataPage(tk.Frame):
         """The function called by the projection TXT button, and looking for txt file which contain a string of projection
         self.controller.shared_data["projection_path"] = will have the path if file is selected
         self.controller.shared_data["projection_string"] = will have the string itself for projection"""
-
+        logger = logging.getLogger(__name__)
         try:
             file_path = tkinter.filedialog.askopenfilename(
                 filetypes=[("Projection file", "*.txt")]
@@ -2953,7 +3044,7 @@ class GeoDataPage(tk.Frame):
             # Handle any potential errors during file selection
             self.controller.shared_data["projection_path"].set("No Projection file selected")
             self.controller.shared_data["projection_string"].set("")
-            print(f"Error during projection file selection: {e}")
+            logger.error(f"Error during projection file selection: {e}")
             if hasattr(self.controller, "debugger") and self.controller.debugger:
                 traceback.print_exc()
             return messagebox.showerror("Error", f"Error selecting projection file: {str(e)}")
@@ -4308,7 +4399,11 @@ class OperationPage(tk.Frame):
     def Create_Feature_List_For_BMS(self):
         # Check all requests before continue to the algorithm
         ## Set Version of Software:
-        BuildingGeneratorVer = "v1.2"
+        # Initialize logger for this function
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        BuildingGeneratorVer = self.controller.shared_data["BuildingGeneratorVer"].get()
 
         generating_method = self.segemented_button.get()
         saving_method = self.saving_method_var.get()
@@ -4335,18 +4430,18 @@ class OperationPage(tk.Frame):
                     if self.values_geo_optionmenu.get() == "Solid":
                         Values = max(min(int(self.textbox_Values_geo2.get()), 100), 0)
                         Values_i = None
-                        print(f"DEBUG: Set Solid value: Values={Values}, Values_i=None")
+                        logger.debug(f"Set Solid value: Values={Values}, Values_i=None")
 
                     elif self.values_geo_optionmenu.get() == "Random":
                         Values = max(min(int(self.textbox_Values_geo2.get()), 100), 0)
                         Values_i = max(
                             min(int(self.textbox_Values_geo1.get()), Values), 0
                         )
-                        print(f"DEBUG: Set Random value range: Values_i={Values_i}, Values={Values}")
+                        logger.debug(f"Set Random value range: Values_i={Values_i}, Values={Values}")
                     else:  # Map mode
                         Values = None
                         Values_i = None
-                        print(f"DEBUG: Set Map mode: Values=None, Values_i=None")
+                        logger.debug(f"Set Map mode: Values=None, Values_i=None")
                     
                     # Prepere Presence of features through the Switch selection
                     Presence = max(min(int(self.textbox_Presence_geo2.get()), 100), 0)
@@ -4396,8 +4491,23 @@ class OperationPage(tk.Frame):
                     # Define the feature generation task that will run in the background thread
                     def generate_features_task(processing_window):
                         try:
-                            # Update the message to show feature generation is in progress
-                            processing_window.update_message(f"Generating {_num_features} features using {_fillter} filter...")
+                            # Update the message to show feature generation is in progress if possible
+                            try:
+                                # Try to update the message if it's a ProcessingWindow instance
+                                if hasattr(processing_window, 'update_message'):
+                                    processing_window.update_message(f"Generating {_num_features} features using {_fillter} filter...")
+                                # If it's a Toplevel, try to update a label if it exists
+                                elif hasattr(processing_window, 'children'):
+                                    # Look for labels in the window's children
+                                    for widget in processing_window.children.values():
+                                        if isinstance(widget, tk.Label) or \
+                                           (hasattr(widget, 'winfo_class') and widget.winfo_class() == 'Label'):
+                                            widget.config(text=f"Generating {_num_features} features using {_fillter} filter...")
+                                            break
+                            except Exception as update_error:
+                                # If updating the UI fails, just log it and continue
+                                # Use the logger from outer scope
+                                logger.warning(f"Could not update processing window: {update_error}")
                             
                             # Call the feature generation function
                             result = Assign_features_accuratly(
@@ -4414,7 +4524,8 @@ class OperationPage(tk.Frame):
                         except Exception as e:
                             import traceback
                             error_details = traceback.format_exc()
-                            logging.getLogger(__name__).error(f"Feature generation error: {error_details}")
+                            # Use the logger from outer scope
+                            logger.error(f"Feature generation error: {error_details}")
                             raise
                     
                     # Run the feature generation task with a processing window
@@ -4462,9 +4573,32 @@ class OperationPage(tk.Frame):
                         
                         # Define the feature saving task that will run in the background thread
                         def save_features_task(processing_window):
+                            nonlocal logger
+                            # Import tkinter and customtkinter to ensure they're accessible in this scope
+                            import tkinter as tk
+                            import customtkinter as Ctk
+                            
                             try:
-                                # Update the message to show feature saving is in progress
-                                processing_window.update_message(f"Saving {_num_features} features in {_saving_method} format...")
+                                # Update the message to show feature saving is in progress safely
+                                # Check if the window has the update_message method (ProcessingWindow instance)
+                                if hasattr(processing_window, 'update_message'):
+                                    processing_window.update_message(f"Saving {_num_features} features in {_saving_method} format...")
+                                # If it's a Toplevel window, try to update a label if present
+                                elif hasattr(processing_window, 'children'):
+                                    # Try to find labels in the window
+                                    for child in processing_window.children.values():
+                                        if isinstance(child, (tk.Label, Ctk.CTkLabel)) and hasattr(child, 'configure'):
+                                            child.configure(text=f"Saving {_num_features} features in {_saving_method} format...")
+                                            break
+                                    # If no label found, add a new one
+                                    else:
+                                        try:
+                                            new_label = tk.Label(processing_window, 
+                                                                text=f"Saving {_num_features} features in {_saving_method} format...")
+                                            new_label.pack(padx=20, pady=20)
+                                        except Exception as label_ex:
+                                            # Silent fail for UI updates
+                                            pass
                                 
                                 # Call the feature saving function
                                 result = Save_accurate_features(
@@ -4486,6 +4620,7 @@ class OperationPage(tk.Frame):
                                     _sorting_saving,
                                     _floor_height,
                                     _floor_deviation,
+                                    self.controller.shared_data, # Pass shared_data
                                     _ct_num,
                                     _obj_num
                                 )
@@ -4495,7 +4630,7 @@ class OperationPage(tk.Frame):
                             except Exception as e:
                                 import traceback
                                 error_details = traceback.format_exc()
-                                logging.getLogger(__name__).error(f"Feature saving error: {error_details}")
+                                logger.error(f"Feature saving error: {error_details}")
                                 raise
                         
                         # Run the feature saving task with a processing window
@@ -4521,15 +4656,15 @@ class OperationPage(tk.Frame):
 
                     elif saving_method == "BMS":
                         # Debug print at start of BMS processing
-                        print("\n===== STARTING BMS INJECTION PROCESS =====\n")
+                        logger.info("\n===== STARTING BMS INJECTION PROCESS =====\n")
                         
                         # Get CT and Obj numbers
                         try:
                             ct_num = int(self.textbox_CT.get())
                             obj_num = int(self.textbox_Obj.get())
-                            print(f"DEBUG: CT number = {ct_num}, Objective number = {obj_num}")
+                            logger.debug(f"CT number = {ct_num}, Objective number = {obj_num}")
                         except (ValueError, TypeError) as e:
-                            print(f"DEBUG: Error parsing CT or objective numbers: {e}")
+                            logger.debug(f"Error parsing CT or objective numbers: {e}")
                             return messagebox.showwarning(
                                 "Procedure Aborted",
                                 "CT Number and Objective Number must be valid integers."
@@ -4537,13 +4672,13 @@ class OperationPage(tk.Frame):
                         
                         # Import the processing window functionality if not already imported
                         from processing_window import run_with_processing
-                        print("DEBUG: Successfully imported run_with_processing")
+                        logger.debug("Successfully imported run_with_processing")
                         
                         # Check which method is selected: Random or GeoJSON
-                        print(f"DEBUG: Selected method = {selection_method}")
+                        logger.debug(f"Selected method = {selection}")
                         
                         # Store common variables used by both methods
-                        print("DEBUG: Setting up common variables")
+                        logger.debug("Setting up common variables")
                         _num_features = num_features
                         _db_path = DB_path
                         _file_save_path = os.path.join(
@@ -4558,8 +4693,8 @@ class OperationPage(tk.Frame):
                         _obj_num = obj_num
                         
                         # Define the feature saving task based on the selection method
-                        if selection_method == "Random Selection":
-                            print("\n=== USING RANDOM SELECTION FOR BMS INJECTION ===\n")
+                        if selection == "Random Selection":
+                            logger.debug("\n=== USING RANDOM SELECTION FOR BMS INJECTION ===\n")
                             
                             # Get the radius for random placement
                             try:
@@ -4573,10 +4708,10 @@ class OperationPage(tk.Frame):
                                 
                             # Get values and presence parameters for random selection
                             try:
-                                _values_random = Values_rand
-                                _values_i_random = Values_i_rand 
-                                _presence_random = Presence_rand
-                                _presence_i_random = Presence_i_rand
+                                _values_random = Values
+                                _values_i_random = Values_i
+                                _presence_random = Presence
+                                _presence_i_random = Presence_i
                             except Exception as e:
                                 logging.getLogger(__name__).error(f"Error setting random parameters: {e}")
                                 import traceback
@@ -4622,6 +4757,7 @@ class OperationPage(tk.Frame):
                                         _presence_i_random,
                                         _values_i_random,
                                         _sorting_saving,
+                                        self.controller.shared_data, # Pass shared_data
                                         _ct_num,
                                         _obj_num
                                     )
@@ -4646,8 +4782,22 @@ class OperationPage(tk.Frame):
                             
                             def save_features_task_bms(processing_window):
                                 try:
-                                    # Update the message to show feature saving is in progress for BMS
-                                    processing_window.update_message(f"Injecting {_num_features} features into BMS objective {_obj_num}...")
+                                    # Update the message to show feature saving is in progress for BMS if possible
+                                    try:
+                                        # Try to update the message if it's a ProcessingWindow instance
+                                        if hasattr(processing_window, 'update_message'):
+                                            processing_window.update_message(f"Injecting {_num_features} features into BMS objective {_obj_num}...")
+                                        # If it's a Toplevel, try to update a label if it exists
+                                        elif hasattr(processing_window, 'children'):
+                                            # Look for labels in the window's children
+                                            for widget in processing_window.children.values():
+                                                if isinstance(widget, tk.Label) or \
+                                                   (hasattr(widget, 'winfo_class') and widget.winfo_class() == 'Label'):
+                                                    widget.config(text=f"Injecting {_num_features} features into BMS objective {_obj_num}...")
+                                                    break
+                                    except Exception as update_error:
+                                        # If updating the UI fails, just log it and continue
+                                        logging.getLogger(__name__).warning(f"Could not update processing window: {update_error}")
                                     
                                     # Call the feature saving function with BMS parameters
                                     return Save_accurate_features(
@@ -4669,6 +4819,7 @@ class OperationPage(tk.Frame):
                                         _sorting_saving,
                                         _floor_height,
                                         _floor_deviation,
+                                        self.controller.shared_data, # Pass shared_data
                                         _ct_num,
                                         _obj_num
                                     )
@@ -4788,12 +4939,32 @@ class OperationPage(tk.Frame):
                     
                     # Define the random feature generation task that will run in the background thread
                     def random_features_task(processing_window):
+                        # Ensure logger is visible in this scope
+                        nonlocal logger
+                        
                         try:
+                            # Update the message to show feature generation is in progress if possible
+                            try:
+                                # Try to update the message if it's a ProcessingWindow instance
+                                if hasattr(processing_window, 'update_message'):
+                                    processing_window.update_message("Preparing random feature generation...")
+                                # If it's a Toplevel, try to update a label if it exists
+                                elif hasattr(processing_window, 'children'):
+                                    # Look for labels in the window's children
+                                    for widget in processing_window.children.values():
+                                        if isinstance(widget, tk.Label) or \
+                                           (hasattr(widget, 'winfo_class') and widget.winfo_class() == 'Label'):
+                                            widget.config(text="Preparing random feature generation...")
+                                            break
+                            except Exception as update_error:
+                                # If updating the UI fails, just log it and continue
+                                logger.warning(f"Could not update processing window: {update_error}")
+                            
                             # Get the selected distribution type
                             distribution_type = self.distribution_selection.get()
                             
-                            # Update the message to show random feature generation is in progress with distribution info
-                            processing_window.update_message(f"Generating {_num_features} random features with {_radius} radius using {distribution_type}...")
+                            # Log message instead of updating processing window
+                            logger.debug(f"[PROCESSING WINDOW] Generating {_num_features} random features with {_radius} radius using {distribution_type}...")
                             
                             # Call the random feature generation function with distribution type
                             return Assign_features_randomly(
@@ -4812,6 +4983,11 @@ class OperationPage(tk.Frame):
                         title="Generating Random Features",
                         message="Initializing random feature generation..."
                     )
+                    
+                    # Check if result is valid (not None or False) and has the expected format
+                    if not result or not isinstance(result, tuple) or len(result) != 3:
+                        logging.getLogger(__name__).error(f"Invalid result from random feature generation: {result}")
+                        return messagebox.showerror("Error", "Failed to generate random features. Check the console for details.")
                     
                     # Get the generated features
                     selected_data, x_coordinates, y_coordinates = result
@@ -4832,9 +5008,28 @@ class OperationPage(tk.Frame):
                     
                     # Define the random feature saving task that will run in the background thread
                     def save_random_features_task(processing_window):
+                        # Ensure logger is visible in this scope
+                        nonlocal logger
+                        
                         try:
-                            # Update the message to show random feature saving is in progress
-                            processing_window.update_message(f"Saving {_num_features} random features in {_saving_method} format...")
+                            # Update the message to show feature saving is in progress if possible
+                            try:
+                                # Try to update the message if it's a ProcessingWindow instance
+                                if hasattr(processing_window, 'update_message'):
+                                    processing_window.update_message(f"Saving {_num_features} random features...")
+                                # If it's a Toplevel, try to update a label if it exists
+                                elif hasattr(processing_window, 'children'):
+                                    # Look for labels in the window's children
+                                    for widget in processing_window.children.values():
+                                        if isinstance(widget, tk.Label) or \
+                                           (hasattr(widget, 'winfo_class') and widget.winfo_class() == 'Label'):
+                                            widget.config(text=f"Saving {_num_features} random features...")
+                                            break
+                            except Exception as update_error:
+                                # If updating the UI fails, just log it and continue
+                                logger.warning(f"Could not update processing window: {update_error}")
+                            
+                            # Proceed with saving the features
                             
                             # Call the random feature saving function
                             return Save_random_features(
@@ -4850,6 +5045,7 @@ class OperationPage(tk.Frame):
                                 _presence_i,
                                 _values_i,
                                 _sorting_saving,
+                                self.controller.shared_data, # Pass shared_data
                                 None,  # CT_Num
                                 None   # Obj_Num
                             )
@@ -4860,12 +5056,20 @@ class OperationPage(tk.Frame):
                             raise
                     
                     # Run the random feature saving task with a processing window
-                    self.BMS_features_map = run_with_processing(
+                    result = run_with_processing(
                         parent=self.controller,
                         task_function=save_random_features_task,
                         title=f"Saving Random Features",
                         message="Initializing random feature saving..."
                     )
+                    
+                    # Check if the result is valid
+                    if result is None or result is False:
+                        logging.getLogger(__name__).error(f"Invalid result from random feature saving: {result}")
+                        return messagebox.showerror("Error", "Failed to save random features. Check the console for details.")
+                    
+                    # Set the result to BMS_features_map
+                    self.BMS_features_map = result
 
                     # Update other dashboard elements as needed
                     self.controller.frames["DashboardPage"].update_pie_chart()
@@ -4925,12 +5129,38 @@ class OperationPage(tk.Frame):
                     
                     # Define the task function that will run in the background thread
                     def random_bms_task(processing_window):
+                        # Ensure logger is visible in this scope
+                        nonlocal logger
+                        
                         try:
+                            # Update the message to show feature generation is in progress if possible
+                            try:
+                                # Try to update the message if it's a ProcessingWindow instance
+                                if hasattr(processing_window, 'update_message'):
+                                    processing_window.update_message("Preparing random feature generation...")
+                                # If it's a Toplevel, try to update a label if it exists
+                                elif hasattr(processing_window, 'children'):
+                                    # Look for labels in the window's children
+                                    for widget in processing_window.children.values():
+                                        if isinstance(widget, tk.Label) or \
+                                           (hasattr(widget, 'winfo_class') and widget.winfo_class() == 'Label'):
+                                            widget.config(text="Preparing random feature generation...")
+                                            break
+                            except Exception as update_error:
+                                # If updating the UI fails, just log it and continue
+                                logger.warning(f"Could not update processing window: {update_error}")
+                            
                             # Get the selected distribution type
                             distribution_type = self.distribution_selection.get()
                             
+                            # Update processing window with current task
+                            try:
+                                if hasattr(processing_window, 'update_message'):
+                                    processing_window.update_message(f"Generating {_num_features} random features...")
+                            except Exception:
+                                pass
+                                
                             # Step 1: Generate random features
-                            processing_window.update_message(f"Generating {_num_features} random features using {distribution_type}...")
                             random_result = Assign_features_randomly(
                                 _num_features, _radius, _db_path, _restriction_text, distribution_type
                             )
@@ -4941,7 +5171,7 @@ class OperationPage(tk.Frame):
                             selected_data, x_coordinates, y_coordinates = random_result
                             
                             # Step 2: Save features to BMS
-                            processing_window.update_message(f"Injecting {_num_features} features into BMS objective {_obj_num}...")
+                            # Note: can't update processing window message since we don't have the parameter
                             
                             return Save_random_features(
                                 "BMS",  # saving_method
@@ -4956,6 +5186,7 @@ class OperationPage(tk.Frame):
                                 _presence_i,
                                 _values_i,
                                 _sorting_option,
+                                self.controller.shared_data, # Pass shared_data
                                 _ct_num,
                                 _obj_num
                             )
@@ -5027,6 +5258,10 @@ class OperationPage(tk.Frame):
         objective numbers to the window if they are available, and updates these
         values in the main UI when the user saves their settings.
         """
+        # Initialize logger for this function
+        import logging
+        logger = logging.getLogger(__name__)
+        
         try:
             from components.bms_injection_window import BmsInjectionWindow
             
@@ -5053,7 +5288,7 @@ class OperationPage(tk.Frame):
             self.wait_window(window)
             
             # Debug: Print if window has result attribute
-            print(f"Window has result attribute: {hasattr(window, 'result')}")
+            logger.debug(f"Window has result attribute: {hasattr(window, 'result')}")
             
             if hasattr(window, 'result'):
                 # Enable the entries in case they're disabled
@@ -5079,7 +5314,7 @@ class OperationPage(tk.Frame):
                     self.textbox_Obj.configure(state="disable")
                 
                 # Debug: Print updated values
-                print(f"Updated CT: {self.textbox_CT.get()}, Obj: {self.textbox_Obj.get()}")
+                logger.debug(f"Updated CT: {self.textbox_CT.get()}, Obj: {self.textbox_Obj.get()}")
                 
         except Exception as e:
             messagebox.showerror(

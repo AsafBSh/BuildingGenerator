@@ -1,0 +1,2099 @@
+import tkinter as tk
+import customtkinter as Ctk
+import logging
+import os
+import sys
+import threading
+import time
+from pathlib import Path
+from tkinter import ttk, messagebox
+from typing import Dict, Any, Optional, List, Tuple
+
+# Add the project root directory to the path for proper imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Now we can import the modules
+from utils.json_path_handler import load_json, save_json, JsonFiles
+from components import objective_cache
+from components.ct_data_handler import CTDataHandler
+
+# Version information for documentation
+__version__ = '1.2.0'
+__author__ = 'BMS Building Generator Team'
+__doc__ = '''
+Enhanced Settings Window for the Building Generator Application
+
+This module provides a modern, user-friendly settings interface with tabbed navigation
+and comprehensive configuration options for BMS object properties.
+
+'''
+
+
+# Ensure we can import from parent directory
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from utils.json_path_handler import load_json, save_json, JsonFiles, get_json_path
+from components.objective_cache import cache as objective_cache
+
+class SettingsWindow(tk.Toplevel):
+    """
+    Enhanced Settings Window for the Building Generator application.
+    
+    Features:
+    - Tabbed interface for organized settings
+    - General settings with BMS and Backup KTO path configuration
+    - BMS Injection settings with Objective Type configuration
+    - Class Table Data settings
+    """
+    
+    def __init__(self, parent, bms_path=None, kto_backup_path=None, database_path=None, 
+                 geojson_path=None, editor_extraction_path=None):
+        """Initialize the Settings Window.
+        
+        Args:
+            parent: Parent window (MainPage)
+            bms_path: Path to BMS CT file
+            kto_backup_path: Path for KTO backup files
+            database_path: Path to BMS database
+            geojson_path: Path to GeoJSON files
+            editor_extraction_path: Path for editor extraction output
+        """
+        super().__init__(parent)
+        self._creation_time = time.perf_counter() # Record creation time
+        
+        # Store reference to parent
+        self.parent = parent
+        
+        # Set window properties
+        self.title("Settings")
+        self.geometry("550x750")
+        self.minsize(550, 750)
+        self.resizable(True, True)
+        self.configure(bg="#FFFFFF")
+        
+        # Store paths
+        self.bms_path = bms_path
+        self.kto_backup_path = kto_backup_path
+        self.database_path = database_path
+        self.geojson_path = geojson_path
+        self.editor_extraction_path = editor_extraction_path
+        
+        # Initialize logger
+        self.logger = logging.getLogger(__name__) # __name__ will be 'components.settings_window'
+        self.logger.setLevel(logging.INFO)     # Ensure this logger processes INFO messages
+
+        # Explicitly configure a console handler for this logger to ensure visibility for debugging
+        # Check if a similar stream handler already exists for this specific logger
+        has_dedicated_console_handler = False
+        for handler in self.logger.handlers:
+            if isinstance(handler, logging.StreamHandler) and \
+               (handler.stream is sys.stdout or handler.stream is sys.stderr):
+                # If one exists, ensure its level is appropriate
+                handler.setLevel(logging.INFO) 
+                has_dedicated_console_handler = True
+                break
+        
+        if not has_dedicated_console_handler:
+            ch = logging.StreamHandler(sys.stdout) # Output to standard out
+            ch.setLevel(logging.INFO)
+            # Use a distinct formatter to clearly identify messages from this logger
+            formatter = logging.Formatter(f'%(asctime)s - %(name)s [{self.__class__.__name__}] - %(levelname)s - %(message)s')
+            ch.setFormatter(formatter)
+            self.logger.addHandler(ch)
+            self.logger.debug(f"Dedicated console handler added to {self.logger.name}.")
+        
+        # Stop messages from this logger from propagating to the root logger's handlers
+        # This prevents duplicate messages if root is also configured for console output
+        # and helps isolate this logger's output for debugging.
+        self.logger.propagate = False
+        
+        # Create the UI
+        self._init_ui()
+        
+        # Center window on screen
+        self.update_idletasks()
+        width = self.winfo_width()
+        height = self.winfo_height()
+        x = (self.winfo_screenwidth() // 2) - (width // 2)
+        y = (self.winfo_screenheight() // 2) - (height // 2)
+        self.geometry(f"{width}x{height}+{x}+{y}")
+        
+        # Set up protocol handler for when the window is closed
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+    
+    def _init_ui(self):
+        """Initialize the user interface components."""
+        # Configure the window background
+        self.configure(bg="#F0F0F5")
+        
+        # Create main frame with modern styling
+        self.main_frame = Ctk.CTkFrame(self, fg_color="#E7E7EF")
+        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Header section with title
+        self.header_frame = Ctk.CTkFrame(self.main_frame, fg_color="#D5E3F0")
+        self.header_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        Ctk.CTkLabel(
+            self.header_frame,
+            text="Settings",
+            font=("Arial", 16, "bold"),
+            text_color="#000000",
+            fg_color="transparent"
+        ).pack(pady=5)
+        
+        # Configure notebook style for a more modern look
+        style = ttk.Style()
+        style.configure("TNotebook", background="#E7E7EF")
+        style.configure("TNotebook.Tab", background="#A1B9D0", foreground="#000000", padding=[12, 6])
+        style.map("TNotebook.Tab", background=[("selected", "#7A92A9")], foreground=[("selected", "#000000")])
+
+        # Create notebook (tabbed interface) with modern styling
+        self.notebook = ttk.Notebook(self.main_frame)
+        self.notebook.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+        
+        # Create tab frames
+        self.general_tab = self._create_scrollable_frame(self.notebook, tab_name="general_tab")
+        self.bms_injection_tab = self._create_scrollable_frame(self.notebook, tab_name="bms_injection_tab")
+        
+        # Add tabs to notebook
+        self.notebook.add(self.general_tab, text="General")
+        self.notebook.add(self.bms_injection_tab, text="BMS Injection")
+        
+        # Initialize content for each tab
+        self._init_general_tab()
+        self._init_bms_injection_tab()
+        
+        # Add bottom buttons frame with modern styling
+        self.buttons_frame = Ctk.CTkFrame(self.main_frame, fg_color="#D5E3F0")
+        self.buttons_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        # Add close button with modern style
+        self.close_button = Ctk.CTkButton(
+            self.buttons_frame,
+            text="Close",
+            command=self._on_close, # Changed from self.destroy
+            fg_color="#A1B9D0",
+            hover_color="#7A92A9",
+            text_color="#000000",
+            height=35,
+            width=167,
+            corner_radius=8,
+            border_width=1,
+            border_color="#8AA2BC",
+            font=("Arial", 12, "bold")
+        )
+        self.close_button.pack(side=tk.RIGHT, padx=8, pady=8)
+    
+    def _create_scrollable_frame(self, parent, tab_name=None):
+        """Create a frame with scrollbars."""
+        # Create a canvas with scrollbar using modern colors
+        frame = Ctk.CTkFrame(parent, fg_color="#E8E8F0")
+        
+        # Create canvas and scrollbar with modern styling
+        canvas = tk.Canvas(frame, bg="#E8E8F0", highlightthickness=0)
+        scrollbar = Ctk.CTkScrollbar(frame, orientation="vertical", command=canvas.yview, 
+                                   button_color="#A1B9D0", button_hover_color="#7A92A9")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # Pack scrollbar and canvas
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # Create inner frame for content
+        inner_frame = Ctk.CTkFrame(canvas, fg_color="#E8E8F0")
+        
+        # Create window in canvas for the inner frame
+        window_id = canvas.create_window((0, 0), window=inner_frame, anchor="nw")
+        
+        # Configure inner frame and canvas
+        def _configure_inner_frame(event):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+            # Make inner frame width match canvas width
+            canvas.itemconfig(window_id, width=canvas.winfo_width())
+        
+        inner_frame.bind("<Configure>", _configure_inner_frame)
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig(window_id, width=e.width))
+        
+        # Enable mousewheel scrolling - use an instance variable to track the binding
+        def _on_mousewheel(event):
+            # Only scroll if the canvas exists and is visible
+            if canvas.winfo_exists():
+                canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            else:
+                # If canvas no longer exists, unbind the mousewheel
+                self.unbind_all("<MouseWheel>")
+                
+        # Store a reference to the function to unbind later
+        if not hasattr(self, '_mouse_bindings'):
+            self._mouse_bindings = {}
+        
+        # Generate a unique identifier if tab_name is not provided
+        if tab_name is None:
+            tab_name = f"frame_{id(frame)}"
+            
+        # Remove any previous binding
+        if tab_name in self._mouse_bindings:
+            self.unbind_all("<MouseWheel>")
+            
+        # Add new binding and store it
+        self._mouse_bindings[tab_name] = _on_mousewheel
+        canvas.bind("<Enter>", lambda e: self.bind_all("<MouseWheel>", _on_mousewheel))
+        canvas.bind("<Leave>", lambda e: self.unbind_all("<MouseWheel>"))
+        
+        return frame
+    
+    def _init_general_tab(self):
+        """Initialize the General tab content."""
+        # Get the scrollable frame content area
+        content_frame = self._get_scrollable_content(self.general_tab)
+        
+        # Create container for configuration presets section with modern styling
+        presets_frame = Ctk.CTkFrame(content_frame, fg_color="#E0E8F0", border_width=1, border_color="#B3C8DD")
+        presets_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        # Section title with modern styling
+        presets_section_label = Ctk.CTkLabel(
+            presets_frame,
+            text="Configuration Presets",
+            font=("Arial", 16, "bold"),
+            text_color="#000033",
+            fg_color="transparent"
+        )
+        presets_section_label.pack(anchor="w", padx=12, pady=(12, 6))
+        
+        # Buttons frame with modern styling
+        buttons_frame = Ctk.CTkFrame(presets_frame, fg_color="#E0E8F0")
+        buttons_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        # Save Preset Button with modern styling
+        self.save_preset_button = Ctk.CTkButton(
+            buttons_frame,
+            text="Save Preset",
+            command=self._save_preset,
+            fg_color="#A1B9D0",
+            hover_color="#7A92A9",
+            text_color="#000000",
+            height=35,
+            width=167,
+            corner_radius=8,
+            border_width=1,
+            border_color="#8AA2BC",
+            font=("Arial", 12)
+        )
+        self.save_preset_button.pack(side=tk.LEFT, padx=6, pady=8)
+        
+        # Load Preset Button with modern styling
+        self.load_preset_button = Ctk.CTkButton(
+            buttons_frame,
+            text="Load Preset",
+            command=self._load_preset,
+            fg_color="#A1B9D0",
+            hover_color="#7A92A9",
+            text_color="#000000",
+            height=35,
+            width=167,
+            corner_radius=8,
+            border_width=1,
+            border_color="#8AA2BC",
+            font=("Arial", 12)
+        )
+        self.load_preset_button.pack(side=tk.LEFT, padx=6, pady=8)
+        
+        # Create container for checkbox options section with modern styling
+        checkbox_frame = Ctk.CTkFrame(content_frame, fg_color="#E0E8F0", border_width=1, border_color="#B3C8DD")
+        checkbox_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        # Section title with modern styling
+        checkbox_section_label = Ctk.CTkLabel(
+            checkbox_frame,
+            text="Options",
+            font=("Arial", 16, "bold"),
+            text_color="#000033",
+            fg_color="transparent"
+        )
+        checkbox_section_label.pack(anchor="w", padx=12, pady=(12, 6))
+        
+        # Checkbox container for row 1 with modern styling
+        checkbox_row1 = Ctk.CTkFrame(checkbox_frame, fg_color="#E0E8F0")
+        checkbox_row1.pack(fill=tk.X, padx=10, pady=5)
+        
+        # Auto-Start Checkbox with modern styling
+        self.auto_start_var = tk.BooleanVar(value=False)
+        self.auto_start_checkbox = Ctk.CTkCheckBox(
+            checkbox_row1,
+            text="Auto-Start",
+            variable=self.auto_start_var,
+            onvalue=True,
+            offvalue=False,
+            command=self._toggle_auto_start,
+            checkbox_height=20,
+            checkbox_width=20,
+            width=120,
+            text_color="#2E2E3A",
+            font=("Arial", 12),
+            hover_color="#7A92A9",
+            fg_color="#8DBBE7"
+        )
+        self.auto_start_checkbox.pack(side=tk.LEFT, padx=8, pady=8)
+        
+        # Spacer to balance the layout
+        spacer = Ctk.CTkFrame(
+            checkbox_row1,
+            width=120,
+            height=20,
+            fg_color="transparent"
+        )
+        spacer.pack(side=tk.LEFT, padx=8, pady=8)
+        
+        # Checkbox container for row 2 with modern styling
+        checkbox_row2 = Ctk.CTkFrame(checkbox_frame, fg_color="#E0E8F0")
+        checkbox_row2.pack(fill=tk.X, padx=10, pady=5)
+        
+        # Backup BMS files checkbox
+        backup_bms_default = True  # Default to True (enable backup)
+        if hasattr(self.parent, 'shared_data') and 'backup_bms_files' in self.parent.shared_data:
+            val = self.parent.shared_data['backup_bms_files']
+            if isinstance(val, tk.StringVar):
+                backup_bms_default = (val.get() == '1')
+            elif isinstance(val, str):
+                backup_bms_default = (val == '1')
+            self.log_info(f"Loaded backup BMS setting: {backup_bms_default} from shared_data type: {type(val).__name__}")
+        else:
+            self.log_info(f"No 'backup_bms_files' in shared_data, using default: {backup_bms_default}")
+
+        self.backup_bms_var = tk.BooleanVar(value=backup_bms_default)
+
+        # Ensure shared_data has a tk.StringVar for 'backup_bms_files' and it's correctly set
+        if hasattr(self.parent, 'shared_data'):
+            current_bms_shared_value_str = "1" if self.backup_bms_var.get() else "0"
+            if not isinstance(self.parent.shared_data.get('backup_bms_files'), tk.StringVar) or \
+            self.parent.shared_data['backup_bms_files'].get() != current_bms_shared_value_str:
+                self.parent.shared_data['backup_bms_files'] = tk.StringVar(value=current_bms_shared_value_str)
+                self.log_info(f"Initialized/Updated 'backup_bms_files' in shared_data as StringVar with value: {current_bms_shared_value_str}")
+        
+        self.backup_bms_checkbox = Ctk.CTkCheckBox(
+            checkbox_row2, # This parent frame should be defined earlier in the method
+            text="Backup BMS files before modification",
+            variable=self.backup_bms_var,
+            onvalue=True,
+            offvalue=False,
+            command=self._toggle_backup_bms,
+            checkbox_height=20,
+            checkbox_width=20,
+            width=260,
+            text_color="#2E2E3A",
+            font=("Arial", 12),
+            hover_color="#7A92A9",
+            fg_color="#8DBBE7"
+        )
+        self.backup_bms_checkbox.pack(side=tk.LEFT, padx=8, pady=8)
+
+        # Backup generated features checkbox
+        backup_features_default = False  # Default to False (disable backup)
+        if hasattr(self.parent, 'shared_data') and 'backup_features_files' in self.parent.shared_data:
+            val = self.parent.shared_data['backup_features_files']
+            if isinstance(val, tk.StringVar):
+                backup_features_default = (val.get() == '1')
+            elif isinstance(val, str):
+                backup_features_default = (val == '1')
+            self.log_info(f"Loaded backup features setting: {backup_features_default} from shared_data type: {type(val).__name__}")
+        else:
+            self.log_info(f"No 'backup_features_files' in shared_data, using default: {backup_features_default}")
+
+        self.backup_features_var = tk.BooleanVar(value=backup_features_default)
+
+        # Ensure shared_data has a tk.StringVar for 'backup_features_files' and it's correctly set
+        if hasattr(self.parent, 'shared_data'):
+            current_features_shared_value_str = "1" if self.backup_features_var.get() else "0"
+            if not isinstance(self.parent.shared_data.get('backup_features_files'), tk.StringVar) or \
+               self.parent.shared_data['backup_features_files'].get() != current_features_shared_value_str:
+                self.parent.shared_data['backup_features_files'] = tk.StringVar(value=current_features_shared_value_str)
+                self.log_info(f"Initialized/Updated 'backup_features_files' in shared_data as StringVar with value: {current_features_shared_value_str}")
+        
+        self.backup_features_checkbox = Ctk.CTkCheckBox(
+            checkbox_row2,
+            text="Backup generated features",
+            variable=self.backup_features_var,
+            onvalue=True,
+            offvalue=False,
+            command=self._toggle_backup_features,
+            checkbox_height=20,
+            checkbox_width=20,
+            width=280,
+            text_color="#2E2E3A",
+            font=("Arial", 12),
+            hover_color="#7A92A9",
+            fg_color="#8DBBE7"
+        )
+        self.backup_features_checkbox.pack(side=tk.LEFT, padx=8, pady=8)
+        
+        # Create container for external tools section with modern styling
+        external_tools_frame = Ctk.CTkFrame(content_frame, fg_color="#E0E8F0", border_width=1, border_color="#B3C8DD")
+        external_tools_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        # Section title with modern styling
+        external_tools_label = Ctk.CTkLabel(
+            external_tools_frame,
+            text="External Tools",
+            font=("Arial", 16, "bold"),
+            text_color="#000033",
+            fg_color="transparent"
+        )
+        external_tools_label.pack(anchor="w", padx=12, pady=(12, 6))
+        
+        # Open Console Window Button with modern styling
+        console_button_frame = Ctk.CTkFrame(external_tools_frame, fg_color="#E0E8F0")
+        console_button_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        self.console_window_button = Ctk.CTkButton(
+            console_button_frame,
+            text="Open Console Window",
+            command=self._open_console_window,
+            fg_color="#A1B9D0",
+            hover_color="#7A92A9",
+            text_color="#000000",
+            height=35,
+            width=354,
+            corner_radius=8,
+            border_width=1,
+            border_color="#8AA2BC",
+            font=("Arial", 12)
+        )
+        self.console_window_button.pack(fill=tk.X, padx=8, pady=8)
+        
+        # Create container for paths section with modern styling
+        paths_frame = Ctk.CTkFrame(content_frame, fg_color="#E0E8F0", border_width=1, border_color="#B3C8DD")
+        paths_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        # Section title with modern styling
+        paths_section_label = Ctk.CTkLabel(
+            paths_frame,
+            text="Paths Configuration",
+            font=("Arial", 16, "bold"),
+            text_color="#000033",
+            fg_color="transparent"
+        )
+        paths_section_label.pack(anchor="w", padx=12, pady=(12, 6))
+        
+        # BMS Path Configuration with modern styling
+        bms_path_frame = Ctk.CTkFrame(paths_frame, fg_color="#E0E8F0")
+        bms_path_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        bms_path_label = Ctk.CTkLabel(
+            bms_path_frame,
+            text="BMS Path:",
+            width=120,
+            anchor="w",
+            text_color="#2E2E3A",
+            font=("Arial", 12)
+        )
+        bms_path_label.pack(side=tk.LEFT, padx=(8, 0))
+        
+        self.bms_path_var = tk.StringVar(value=self.bms_path if self.bms_path else "No BMS path selected")
+        self.bms_path_entry = Ctk.CTkEntry(
+            bms_path_frame,
+            textvariable=self.bms_path_var,
+            state="readonly",
+            width=400,
+            fg_color="#FFFFFF",
+            text_color="#000000",
+            border_width=1,
+            border_color="#B3C8DD",
+            font=("Arial", 11)
+        )
+        self.bms_path_entry.pack(side=tk.LEFT, padx=8, pady=8, fill=tk.X, expand=True)
+        
+        # Backup KTO Path Configuration with modern styling
+        backup_path_frame = Ctk.CTkFrame(paths_frame, fg_color="#E0E8F0")
+        backup_path_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        backup_path_label = Ctk.CTkLabel(
+            backup_path_frame,
+            text="Backup KTO Path:",
+            width=120,
+            anchor="w",
+            text_color="#2E2E3A",
+            font=("Arial", 12)
+        )
+        backup_path_label.pack(side=tk.LEFT, padx=(8, 0))
+        
+        self.backup_path_var = tk.StringVar(value=self.kto_backup_path if self.kto_backup_path else "No backup path selected")
+        self.backup_path_entry = Ctk.CTkEntry(
+            backup_path_frame,
+            textvariable=self.backup_path_var,
+            state="readonly",
+            width=400,
+            fg_color="#FFFFFF",
+            text_color="#000000",
+            border_width=1,
+            border_color="#B3C8DD",
+            font=("Arial", 11)
+        )
+        self.backup_path_entry.pack(side=tk.LEFT, padx=8, pady=8, fill=tk.X, expand=True)
+        
+        # Database Path Configuration with modern styling
+        db_path_frame = Ctk.CTkFrame(paths_frame, fg_color="#E0E8F0")
+        db_path_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        db_path_label = Ctk.CTkLabel(
+            db_path_frame,
+            text="Database Path:",
+            width=120,
+            anchor="w",
+            text_color="#2E2E3A",
+            font=("Arial", 12)
+        )
+        db_path_label.pack(side=tk.LEFT, padx=(8, 0))
+        
+        self.db_path_var = tk.StringVar(value=self.database_path if self.database_path else "No database path selected")
+        self.db_path_entry = Ctk.CTkEntry(
+            db_path_frame,
+            textvariable=self.db_path_var,
+            state="readonly",
+            width=400,
+            fg_color="#FFFFFF",
+            text_color="#000000",
+            border_width=1,
+            border_color="#B3C8DD",
+            font=("Arial", 11)
+        )
+        self.db_path_entry.pack(side=tk.LEFT, padx=8, pady=8, fill=tk.X, expand=True)
+        
+        # GeoJSON Path Configuration with modern styling
+        geojson_path_frame = Ctk.CTkFrame(paths_frame, fg_color="#E0E8F0")
+        geojson_path_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        geojson_path_label = Ctk.CTkLabel(
+            geojson_path_frame,
+            text="GeoJSON Path:",
+            width=120,
+            anchor="w",
+            text_color="#2E2E3A",
+            font=("Arial", 12)
+        )
+        geojson_path_label.pack(side=tk.LEFT, padx=(8, 0))
+        
+        self.geojson_path_var = tk.StringVar(value=self.geojson_path if self.geojson_path else "No GeoJSON path selected")
+        self.geojson_path_entry = Ctk.CTkEntry(
+            geojson_path_frame,
+            textvariable=self.geojson_path_var,
+            state="readonly",
+            width=400,
+            fg_color="#FFFFFF",
+            text_color="#000000",
+            border_width=1,
+            border_color="#B3C8DD",
+            font=("Arial", 11)
+        )
+        self.geojson_path_entry.pack(side=tk.LEFT, padx=8, pady=8, fill=tk.X, expand=True)
+        
+        # Editor Extraction Path Configuration with modern styling
+        editor_path_frame = Ctk.CTkFrame(paths_frame, fg_color="#E0E8F0")
+        editor_path_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        editor_path_label = Ctk.CTkLabel(
+            editor_path_frame,
+            text="Editor Output:",
+            width=120,
+            anchor="w",
+            text_color="#2E2E3A",
+            font=("Arial", 12)
+        )
+        editor_path_label.pack(side=tk.LEFT, padx=(8, 0))
+        
+        self.editor_path_var = tk.StringVar(value=self.editor_extraction_path if self.editor_extraction_path else "No editor path selected")
+        self.editor_path_entry = Ctk.CTkEntry(
+            editor_path_frame,
+            textvariable=self.editor_path_var,
+            state="readonly",
+            width=400,
+            fg_color="#FFFFFF",
+            text_color="#000000",
+            border_width=1,
+            border_color="#B3C8DD",
+            font=("Arial", 11)
+        )
+        self.editor_path_entry.pack(side=tk.LEFT, padx=8, pady=8, fill=tk.X, expand=True)
+        
+        # Create container for logging section with modern styling
+        logging_frame = Ctk.CTkFrame(content_frame, fg_color="#E0E8F0", border_width=1, border_color="#B3C8DD")
+        logging_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        # Section title with modern styling
+        logging_section_label = Ctk.CTkLabel(
+            logging_frame,
+            text="Logging Configuration",
+            font=("Arial", 16, "bold"),
+            text_color="#000033",
+            fg_color="transparent"
+        )
+        logging_section_label.pack(anchor="w", padx=12, pady=(12, 6))
+        
+        # Logging Type with modern styling
+        log_type_frame = Ctk.CTkFrame(logging_frame, fg_color="#E0E8F0")
+        log_type_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        log_type_label = Ctk.CTkLabel(
+            log_type_frame,
+            text="Logging Type:",
+            width=120,
+            anchor="w",
+            text_color="#2E2E3A",
+            font=("Arial", 12)
+        )
+        log_type_label.pack(side=tk.LEFT, padx=(8, 0))
+        
+        self.log_type_var = tk.StringVar()
+        # Initialize from shared_data, defaulting to "Console Only" if not found or invalid
+        initial_log_method = self.parent.shared_data.get("logging_method").get() if self.parent.shared_data.get("logging_method") else "Console Only"
+        # Ensure the loaded value is one of the valid options for the dropdown
+        valid_log_types = ["None", "Console Only", "File Only", "Console and File"]
+        if initial_log_method not in valid_log_types: # Map from simple config value if needed
+            if initial_log_method == "Console": initial_log_method = "Console Only"
+            elif initial_log_method == "File": initial_log_method = "File Only"
+            elif initial_log_method == "Both": initial_log_method = "Console and File"
+            else: initial_log_method = "Console Only" # Fallback
+        self.log_type_var.set(initial_log_method if initial_log_method in valid_log_types else "Console Only")
+        self.log_type_dropdown = Ctk.CTkComboBox(
+            log_type_frame,
+            values=["None", "Console Only", "File Only", "Console and File"],
+            variable=self.log_type_var,
+            state="readonly",
+            width=170,
+            fg_color="#FFFFFF",
+            text_color="#000000",
+            button_color="#A1B9D0",
+            button_hover_color="#7A92A9",
+            border_width=1,
+            border_color="#B3C8DD",
+            dropdown_fg_color="#FFFFFF",
+            font=("Arial", 11)
+        )
+        self.log_type_dropdown.pack(side=tk.LEFT, padx=8, pady=8)
+        
+        # Logging Level with modern styling
+        log_level_frame = Ctk.CTkFrame(logging_frame, fg_color="#E0E8F0")
+        log_level_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        log_level_label = Ctk.CTkLabel(
+            log_level_frame,
+            text="Logging Level:",
+            width=120,
+            anchor="w",
+            text_color="#2E2E3A",
+            font=("Arial", 12)
+        )
+        log_level_label.pack(side=tk.LEFT, padx=(8, 0))
+        
+        self.log_level_var = tk.StringVar()
+        initial_log_level = self.parent.shared_data.get("log_level").get() if self.parent.shared_data.get("log_level") else "INFO"
+        valid_log_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+        self.log_level_var.set(initial_log_level if initial_log_level in valid_log_levels else "INFO")
+        self.log_level_dropdown = Ctk.CTkComboBox(
+            log_level_frame,
+            values=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+            variable=self.log_level_var,
+            state="readonly",
+            width=170,
+            fg_color="#FFFFFF",
+            text_color="#000000",
+            button_color="#A1B9D0",
+            button_hover_color="#7A92A9",
+            border_width=1,
+            border_color="#B3C8DD",
+            dropdown_fg_color="#FFFFFF",
+            font=("Arial", 11)
+        )
+        self.log_level_dropdown.pack(side=tk.LEFT, padx=8, pady=8)
+        
+        # Add buttons for general tab options with modern styling
+        buttons_frame = Ctk.CTkFrame(content_frame, fg_color="#E0E8F0")
+        buttons_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        self.apply_logging_settings_button = Ctk.CTkButton(
+            buttons_frame,
+            text="Apply Logging Settings",
+            command=self._apply_logging_settings,
+            fg_color="#A1B9D0",
+            hover_color="#7A92A9",
+            text_color="#000000",
+            height=35,
+            width=200,
+            corner_radius=8,
+            border_width=1,
+            border_color="#8AA2BC",
+            font=("Arial", 12)
+        )
+        self.apply_logging_settings_button.pack(side=tk.RIGHT, padx=8, pady=8)
+    
+    def _init_bms_injection_tab(self):
+        """Initialize the BMS Injection tab content."""
+        # Get the scrollable frame content area
+        content_frame = self._get_scrollable_content(self.bms_injection_tab)
+        
+        # Create data type selector frame at the top with modern styling
+        data_type_frame = Ctk.CTkFrame(content_frame, fg_color="#E0E8F0", border_width=1, border_color="#B3C8DD")
+        data_type_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        # Section title with modern styling
+        bms_section_label = Ctk.CTkLabel(
+            data_type_frame,
+            text="BMS Data Selection",
+            font=("Arial", 16, "bold"),
+            text_color="#000033",
+            fg_color="transparent"
+        )
+        bms_section_label.pack(anchor="w", padx=12, pady=(12, 6))
+        
+        # Data type selector container
+        selector_frame = Ctk.CTkFrame(data_type_frame, fg_color="#E0E8F0")
+        selector_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        # Add data type label with modern styling
+        data_type_label = Ctk.CTkLabel(
+            selector_frame,
+            text="Data Type:",
+            width=120,
+            anchor="w",
+            text_color="#2E2E3A",
+            font=("Arial", 12)
+        )
+        data_type_label.pack(side=tk.LEFT, padx=(8, 0), pady=8)
+        
+        # Add data type dropdown with modern styling
+        self.data_type_var = tk.StringVar(value="Objective Data")
+        self.data_type_dropdown = Ctk.CTkComboBox(
+            selector_frame,
+            values=["Objective Data", "Class Table Data"],
+            variable=self.data_type_var,
+            state="readonly",
+            width=170,
+            fg_color="#FFFFFF",
+            text_color="#000000",
+            button_color="#A1B9D0",
+            button_hover_color="#7A92A9",
+            border_width=1,
+            border_color="#B3C8DD",
+            dropdown_fg_color="#FFFFFF",
+            font=("Arial", 11),
+            command=self._update_bms_content
+        )
+        self.data_type_dropdown.pack(side=tk.LEFT, padx=8, pady=8)
+        
+        # Add content frame that will be updated based on selection with modern styling
+        self.dynamic_content_frame = Ctk.CTkFrame(content_frame, fg_color="#E0E8F0", border_width=1, border_color="#B3C8DD")
+        self.dynamic_content_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Load objective types from templates and cache
+        self.objective_types = self._load_objective_types()
+        
+        # Create sub-frames for different data types (initially hidden)
+        self.objective_frame = Ctk.CTkFrame(self.dynamic_content_frame, fg_color="#E0E8F0")
+        self.ct_frame = Ctk.CTkFrame(self.dynamic_content_frame, fg_color="#E0E8F0")
+        
+        # Initialize with default selection (Objective Data)
+        self._update_bms_content("Objective Data")
+    
+    def _load_objective_types(self):
+        """Load objective types from templates and cache.
+        
+        Returns a dictionary of objective types with ID as key and name as value.
+        Tries to load from:  
+        1. objective_templates.json
+        2. Objective cache
+        """
+        objective_types = {}
+        
+        try:
+            # Try to load from objective_templates.json first
+            obj_templates = load_json(JsonFiles.OBJECTIVE_TEMPLATES, default={})
+            if obj_templates:
+                for obj_id in obj_templates.keys():
+                    # Add to objective_types with the ID-Name format
+                    type_name = self._get_type_name(int(obj_id))
+                    objective_types[obj_id] = f"{obj_id}: {type_name}"
+                self.log_info(f"Loaded {len(objective_types)} objective types from templates")
+            
+            # If no types found in templates, try objective cache
+            if not objective_types:
+                cache_types = objective_cache.get_objective_types()
+                if cache_types:
+                    for obj_id, type_name in cache_types.items():
+                        objective_types[str(obj_id)] = f"{obj_id}: {type_name}"
+                    self.log_info(f"Loaded {len(objective_types)} objective types from cache")
+            
+            # If still no types found, use default fallback list
+            if not objective_types:
+                # Provide basic fallback list
+                fallback_types = {
+                    "1": "1: Airbase",
+                    "2": "2: Airstrip",
+                    "3": "3: Army Base",
+                    "9": "9: Command & Control",
+                    "20": "20: Power Plant",
+                    "31": "31: SAM Site"
+                }
+                objective_types = fallback_types
+                self.log_info("Using fallback objective types list")
+        
+        except Exception as e:
+            self.log_error("Error loading objective types", e)
+            # Provide minimal fallback if everything fails
+            objective_types = {"1": "1: Airbase"}
+        
+        return objective_types
+        
+    def _load_objective_fields(self, selection):
+        """Load the fields for the selected objective type.
+        
+        This method implements lazy loading of objective properties to improve performance
+        with large datasets. It uses a cached approach for displaying properties and
+        categorizes them into logical groups for better organization.
+        
+        Args:
+            selection (str): The selected objective type in format 'ID: Name'
+        """
+        # Performance optimization - Use a loading indicator for large datasets
+        loading_start_time = time.time()
+        
+        # Clear existing fields
+        for widget in self.obj_fields_frame.winfo_children():
+            widget.destroy()
+            
+        # Get the type ID from the selection string (format: "ID: Name")
+        try:
+            # Extract just the ID number from the selection string
+            type_id = selection.split(":")[0].strip()
+        except Exception as e:
+            self.log_error(f"Error parsing objective type: {selection}", e)
+            return
+        
+        # Load the template for this type
+        try:
+            templates = load_json(JsonFiles.OBJECTIVE_TEMPLATES, default={})
+            
+            # Check if type exists in templates
+            if type_id not in templates:
+                # Create empty section with message
+                message_label = Ctk.CTkLabel(
+                    self.obj_fields_frame,
+                    text=f"No template found for objective type {type_id}. Using default template (not saved).",
+                    font=("Arial", 12),
+                    text_color="#2E2E3A",
+                    fg_color="transparent"
+                )
+                message_label.pack(padx=10, pady=20)
+                
+                # Create default template in memory only (don't save to file yet)
+                # This prevents overriding existing templates in the file
+                templates[type_id] = self._create_default_template()
+                self.log_info(f"Created temporary default template for objective type {type_id} (not saved to file)")
+            
+            # Create fields for each property
+            self.field_vars = {}  # Store StringVars for each field
+            
+            # Create a container frame without scrolling (uses main window scrolling)
+            fields_container = Ctk.CTkFrame(
+                self.obj_fields_frame, 
+                fg_color="#E0E8F0",
+                border_width=1,
+                border_color="#B3C8DD"
+            )
+            fields_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+            
+            # Add a title for the properties section
+            props_title = Ctk.CTkLabel(
+                fields_container,
+                text="Objective Properties",
+                font=("Arial", 12, "bold"),
+                text_color="#000033",
+                fg_color="#D5E3F0",
+                corner_radius=5
+            )
+            props_title.pack(fill=tk.X, padx=5, pady=5)
+            
+            # Sort properties for consistent display
+            sorted_props = sorted(templates[type_id].items())
+            
+            # Group detection properties
+            detection_frame = Ctk.CTkFrame(fields_container, fg_color="#E0E8F0")
+            detection_frame.pack(fill=tk.X, padx=5, pady=5)
+            
+            det_label = Ctk.CTkLabel(
+                detection_frame,
+                text="Detection Properties",
+                font=("Arial", 12, "bold"),
+                text_color="#000033",
+                fg_color="#D5E3F0",
+                corner_radius=5
+            )
+            det_label.pack(fill=tk.X, padx=5, pady=5)
+            
+            # Group damage properties
+            damage_frame = Ctk.CTkFrame(fields_container, fg_color="#E0E8F0")
+            damage_frame.pack(fill=tk.X, padx=5, pady=5)
+            
+            dam_label = Ctk.CTkLabel(
+                damage_frame,
+                text="Damage Properties",
+                font=("Arial", 12, "bold"),
+                text_color="#000033",
+                fg_color="#D5E3F0",
+                corner_radius=5
+            )
+            dam_label.pack(fill=tk.X, padx=5, pady=5)
+            
+            # Group other properties including Value field
+            other_frame = Ctk.CTkFrame(fields_container, fg_color="#E0E8F0")
+            other_frame.pack(fill=tk.X, padx=5, pady=5)
+            
+            other_label = Ctk.CTkLabel(
+                other_frame,
+                text="Other Properties",
+                font=("Arial", 12, "bold"),
+                text_color="#000033",
+                fg_color="#D5E3F0",
+                corner_radius=5
+            )
+            other_label.pack(fill=tk.X, padx=5, pady=5)
+            
+            # Assign properties to appropriate group
+            for prop_name, prop_value in sorted_props:
+                # Create StringVar and store for later retrieval
+                var = tk.StringVar(value=prop_value)
+                self.field_vars[prop_name] = var
+                
+                # Create property row
+                if prop_name.startswith("Det_"):
+                    target_frame = detection_frame
+                elif prop_name.startswith("Dam_"):
+                    target_frame = damage_frame
+                else:
+                    target_frame = other_frame
+                    
+                # Create row frame
+                row_frame = Ctk.CTkFrame(target_frame, fg_color="#E0E8F0")
+                row_frame.pack(fill=tk.X, padx=5, pady=2)
+                
+                # Property label
+                prop_label = Ctk.CTkLabel(
+                    row_frame,
+                    text=prop_name + ":",
+                    width=150,
+                    anchor="w",
+                    text_color="#2E2E3A",
+                    font=("Arial", 11)
+                )
+                prop_label.pack(side=tk.LEFT, padx=5, pady=3)
+                
+                # Property entry
+                prop_entry = Ctk.CTkEntry(
+                    row_frame,
+                    textvariable=var,
+                    width=180,  # Increased width for better visibility
+                    fg_color="#FFFFFF",
+                    text_color="#000000",
+                    border_width=1,
+                    border_color="#B3C8DD",
+                    font=("Arial", 11)
+                )
+                prop_entry.pack(side=tk.LEFT, padx=5, pady=5, fill=tk.X, expand=True)
+            
+            self.log_info(f"Loaded {len(self.field_vars)} properties for objective type {type_id}")
+            
+        except Exception as e:
+            self.log_error(f"Error loading objective fields for type {type_id}", e)
+            # Create error message
+            error_label = Ctk.CTkLabel(
+                self.obj_fields_frame,
+                text=f"Error loading fields: {str(e)}",
+                font=("Arial", 12),
+                text_color="#FF0000",
+                fg_color="transparent"
+            )
+            error_label.pack(padx=10, pady=20)
+    
+    def _get_type_name(self, type_id):
+        """Get the name for an objective type ID."""
+        type_names = {
+            1: "Airbase",
+            2: "Airstrip",
+            3: "Army Base",
+            4: "Beach",
+            5: "Border",
+            6: "Bridge",
+            7: "Chemical",
+            8: "City",
+            9: "Command & Control",
+            10: "Depot",
+            11: "Factory",
+            12: "Ford",
+            13: "Fortification",
+            14: "Scenery",
+            15: "Intersect",
+            16: "Nav Beacon",
+            17: "Nuclear",
+            18: "Pass",
+            19: "Port",
+            20: "Power Plant",
+            21: "Radar",
+            22: "Radio Tower",
+            23: "Rail Terminal",
+            24: "Railroad",
+            25: "Refinery",
+            26: "Railroad",
+            27: "Seal",
+            28: "Town",
+            29: "Village",
+            30: "HARTS",
+            31: "SAM Site"
+        }
+        return type_names.get(type_id, f"Type {type_id}")
+    
+    def _update_bms_content(self, selection=None):
+        """Update the BMS Injection tab content based on data type selection.
+        
+        This method handles switching between Objective Data and Class Table Data views,
+        ensuring that the appropriate data is loaded and displayed.
+        """
+        # Start performance tracking
+        start_time = time.time()
+        
+        # Clear existing content in dynamic frame
+        for widget in self.dynamic_content_frame.winfo_children():
+            widget.pack_forget()
+            
+        # If no selection is provided, get from StringVar
+        if not selection:
+            selection = self.data_type_var.get()
+        else:
+            # Update StringVar to match selection
+            self.data_type_var.set(selection)
+            
+        # Store current data type for context-aware operations
+        self.current_data_type = selection
+        
+        if selection == "Objective Data":
+            # Initialize objective data interface if not already done
+            if not hasattr(self, 'objective_type_var'):
+                self._init_objective_interface()
+            
+            # Show objective frame
+            self.objective_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+            
+            # Update data source indicator
+            if hasattr(self, 'data_source_label'):
+                self.data_source_label.configure(text="Data Source: objective_templates.json")
+            
+            # Load data for the currently selected objective type
+            if hasattr(self, 'objective_type_var') and self.objective_type_var.get():
+                self._load_objective_fields(self.objective_type_var.get())
+            else:
+                # Auto-select first objective type if none selected
+                if hasattr(self, 'objective_types') and self.objective_types:
+                    first_type = next(iter(self.objective_types.values()))
+                    self.objective_type_var.set(first_type)
+                    self._load_objective_fields(first_type)
+        
+        elif selection == "Class Table Data":
+            # Initialize CT data interface if not already done
+            if not hasattr(self, 'ct_type_var'):
+                self._init_ct_interface()
+                
+            # Show CT frame
+            self.ct_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+            
+            # Update data source indicator
+            if hasattr(self, 'data_source_label'):
+                self.data_source_label.configure(text="Data Source: ct_templates.json")
+            
+            # Load data for the currently selected CT type
+            if hasattr(self, 'ct_type_var') and self.ct_type_var.get():
+                self._load_ct_fields(self.ct_type_var.get())
+            else:
+                # Auto-select first CT type if none selected
+                if hasattr(self, 'ct_types') and self.ct_types:
+                    first_type = next(iter(self.ct_types.values()))
+                    self.ct_type_var.set(first_type)
+                    self._load_ct_fields(first_type)
+            
+        # Log performance metrics
+        elapsed_time = time.time() - start_time
+        self.log_info(f"Updated BMS content for {selection} in {elapsed_time:.4f} seconds")
+            
+    def _save_objective_template(self):
+        """Save the current objective template configuration.
+        
+        This method saves the currently selected objective type template to the
+        objective_templates.json file. It only updates the specific type selected,
+        preserving all other data in the file.
+        """
+        try:
+            # Start performance tracking
+            start_time = time.time()
+            
+            # Get the type ID from the selection string
+            selection = self.objective_type_var.get()
+            type_id = selection.split(":")[0].strip()
+            
+            # Load existing templates - important to preserve all other objective types
+            templates = load_json(JsonFiles.OBJECTIVE_TEMPLATES, default={})
+            
+            # Batch processing - collect all field values before writing
+            new_template = {}
+            for field_name, string_var in self.field_vars.items():
+                new_template[field_name] = string_var.get()
+            
+            # Ensure Value field is included (recent enhancement to bms_injector.py)
+            if "Value" not in new_template:
+                new_template["Value"] = "0"
+            
+            # Create confirmation message - using triple quotes to avoid syntax issues
+            confirm_message = f"""Save template for objective type {type_id}?
+This will update ONLY this specific objective type."""
+            
+            # Show a confirmation dialog before saving
+            if messagebox.askyesno("Confirm Save", confirm_message):
+                # Update only this specific template
+                templates[type_id] = new_template
+                
+                # Save templates to file
+                save_json(JsonFiles.OBJECTIVE_TEMPLATES, templates)
+                
+                # Log performance metrics for optimization
+                elapsed_time = time.time() - start_time
+                self.log_info(f"Saved template for objective type {type_id} in {elapsed_time:.2f} seconds")
+                
+                # Show confirmation - this is appropriate for an explicit save action
+                self.log_info(f"Template for objective type {type_id} saved successfully", show_popup=True)
+            
+        except Exception as e:
+            # Show error message since this is an explicit user action
+            self.log_error("Error saving objective template", e, show_popup=True)
+    
+    def _reset_objective_fields(self):
+        """Reset objective fields to default values."""
+        try:
+            # Get current selection
+            selection = self.objective_type_var.get()
+            
+            # Extract the type key from selection (format is 'ID: Name')
+            type_key = None
+            if selection and ':' in selection:
+                try:
+                    type_key = int(selection.split(':', 1)[0].strip())
+                except ValueError:
+                    self.log_error(f"Invalid type key in selection: {selection}")
+            
+            if not type_key:
+                self.log_error("No objective type selected")
+                messagebox.showerror("Error", "Please select an objective type first")
+                return
+            
+            # Confirm with user
+            if messagebox.askyesno("Confirm Reset", "Are you sure you want to reset all fields to default values?"):
+                # Get default template from objective cache
+                template = objective_cache.get_objective_templates(type_key)
+                
+                # If template not in cache, try to load from BMS data
+                if not template or not template.items():
+                    try:
+                        from bms_injector import BmsInjector
+                        
+                        # Create a BMS injector object if not already available
+                        injector = BmsInjector(self.bms_path)
+                        
+                        # Get template from BMS injector
+                        template = injector.objective_templates.get(str(type_key), {})
+                        self.log_info(f"Using template from BMS data with {len(template)} fields")
+                    except Exception as template_err:
+                        self.log_error(f"Failed to load template from BMS data: {str(template_err)}", template_err)
+                        template = {}
+                else:
+                    self.log_info(f"Using template from cache with {len(template)} fields")
+                
+                # If we still don't have a template, create minimal defaults
+                if not template or not template.items():
+                    template = {
+                        "DataRate": "0",
+                        "DeaggDistance": "0",
+                        "Value": "0"  # Ensure Value field is included
+                    }
+                    self.log_info("Using minimal default template")
+                
+                # Update all fields with template values
+                field_count = 0
+                for field_name, string_var in self.field_vars.items():
+                    if field_name in template:
+                        string_var.set(template[field_name])
+                    else:
+                        string_var.set("0")  # Default for unknown fields
+                    field_count += 1
+                
+                self.log_info(f"Reset {field_count} fields to dynamic template values")
+                messagebox.showinfo("Fields Reset", "All fields have been reset to default values.")
+        
+        except Exception as e:
+            self.log_error("Error resetting objective fields", e)
+            messagebox.showerror("Error", f"Failed to reset fields: {str(e)}")
+    
+    def _toggle_backup_bms(self):
+        """Toggle backup BMS files setting.
+        
+        Controls whether BMS files are backed up before modification.
+        This is a safety feature to prevent data loss.
+        """
+        # Update backup BMS setting with optimized performance
+        try:
+            # Store setting in configuration
+            if hasattr(self.parent, 'shared_data'):
+                # Use string value for compatibility with MainGui
+                backup_value = "1" if self.backup_bms_var.get() else "0"
+                # Store the value in parent's shared data
+                if 'backup_bms_files' in self.parent.shared_data:
+                    self.parent.shared_data['backup_bms_files'].set(backup_value)
+                else:
+                    # Create the variable if it doesn't exist
+                    self.parent.shared_data['backup_bms_files'] = tk.StringVar(value=backup_value)
+                
+                # Update in a thread-safe manner and log clearly
+                status = "enabled" if self.backup_bms_var.get() else "disabled"
+                # Log with root logger for better visibility in main log output
+                logging.getLogger('root').info(f"BMS file backup {status}")
+                self.log_info(f"BMS file backup {status}")
+                
+                # Make the logging more prominent for debugging
+                self.log_info(f"======= BMS BACKUP SETTING CHANGED: {status} =======")
+        except Exception as e:
+            self.log_error("Error toggling BMS backup setting", e)
+    
+    def _toggle_backup_features(self):
+        """Toggle backup generated features setting.
+        
+        Controls whether generated features are backed up for critical cases.
+        This helps with troubleshooting and recovery if issues arise.
+        """
+        # Update backup features setting with optimized performance
+        try:
+            # Store setting in configuration
+            if hasattr(self.parent, 'shared_data'):
+                # Use string value for compatibility with MainGui
+                backup_value = "1" if self.backup_features_var.get() else "0"
+                
+                # Update the shared_data variable to be used by the BmsInjector
+                if 'backup_features_files' in self.parent.shared_data:
+                    self.parent.shared_data['backup_features_files'].set(backup_value)
+                else:
+                    self.parent.shared_data['backup_features_files'] = tk.StringVar(value=backup_value)
+                
+                # Update in a thread-safe manner
+                status = "enabled" if self.backup_features_var.get() else "disabled"
+                self.log_info(f"Critical features backup {status}")
+        except Exception as e:
+            self.log_error("Error toggling features backup setting", e)
+    
+    def _init_objective_interface(self):
+        """Initialize the interface for objective data."""
+        # Create the objective type selection section
+        obj_type_frame = Ctk.CTkFrame(self.objective_frame, fg_color="#E0E8F0")
+        obj_type_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        # Title for objective type section
+        obj_type_title = Ctk.CTkLabel(
+            obj_type_frame,
+            text="Objective Type Configuration",
+            font=("Arial", 14, "bold"),
+            text_color="#000033",
+            fg_color="transparent"
+        )
+        obj_type_title.pack(anchor="w", padx=10, pady=(10, 5))
+        
+        # Objective type selection container
+        type_select_frame = Ctk.CTkFrame(obj_type_frame, fg_color="#E0E8F0")
+        type_select_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        # Objective type label
+        type_label = Ctk.CTkLabel(
+            type_select_frame,
+            text="Objective Type:",
+            width=120,
+            anchor="w",
+            text_color="#2E2E3A",
+            font=("Arial", 12)
+        )
+        type_label.pack(side=tk.LEFT, padx=(8, 0), pady=8)
+        
+        # Objective type dropdown
+        self.objective_type_var = tk.StringVar(value=next(iter(self.objective_types.values()), "1: Airbase"))
+        self.objective_type_dropdown = Ctk.CTkComboBox(
+            type_select_frame,
+            values=list(self.objective_types.values()),
+            variable=self.objective_type_var,
+            state="readonly",
+            width=250,
+            fg_color="#FFFFFF",
+            text_color="#000000",
+            button_color="#A1B9D0",
+            button_hover_color="#7A92A9",
+            border_width=1,
+            border_color="#B3C8DD",
+            dropdown_fg_color="#FFFFFF",
+            font=("Arial", 11),
+            command=self._load_objective_fields
+        )
+        self.objective_type_dropdown.pack(side=tk.LEFT, padx=8, pady=8)
+        
+        # Create fields frame for the objective properties
+        self.obj_fields_frame = Ctk.CTkFrame(self.objective_frame, fg_color="#E0E8F0", border_width=1, border_color="#B3C8DD")
+        self.obj_fields_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Buttons frame for save and default options
+        buttons_frame = Ctk.CTkFrame(self.objective_frame, fg_color="#E0E8F0")
+        buttons_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        # Save button for objective data
+        self.save_obj_button = Ctk.CTkButton(
+            buttons_frame,
+            text="Save Template",
+            command=self._save_objective_template,
+            fg_color="#A1B9D0",
+            hover_color="#7A92A9",
+            text_color="#000000",
+            height=35,
+            width=150,
+            corner_radius=8,
+            border_width=1,
+            border_color="#8AA2BC",
+            font=("Arial", 12)
+        )
+        self.save_obj_button.pack(side=tk.LEFT, padx=8, pady=8)
+        
+        # Default button for objective data
+        self.default_obj_button = Ctk.CTkButton(
+            buttons_frame,
+            text="Reset to Default",
+            command=self._reset_objective_fields,
+            fg_color="#A1B9D0",
+            hover_color="#7A92A9",
+            text_color="#000000",
+            height=35,
+            width=150,
+            corner_radius=8,
+            border_width=1,
+            border_color="#8AA2BC",
+            font=("Arial", 12)
+        )
+        self.default_obj_button.pack(side=tk.LEFT, padx=8, pady=8)
+        
+        # Load the fields for initially selected objective type
+        if self.objective_type_var.get():
+            self._load_objective_fields(self.objective_type_var.get())
+    
+    def _load_ct_fields(self, selection):
+        """Load the fields for the selected Class Table type.
+        
+        Args:
+            selection (str): The selected class table type in format 'ID: Name'
+        """
+        # Start performance tracking
+        loading_start_time = time.time()
+        
+        # Clear existing fields
+        for widget in self.ct_fields_frame.winfo_children():
+            widget.destroy()
+            
+        # Get the type ID from the selection string (format: "ID: Name")
+        try:
+            # Extract just the ID number from the selection string
+            type_id = selection.split(":")[0].strip()
+        except Exception as e:
+            self.log_error(f"Error parsing class table type: {selection}", e)
+            messagebox.showerror("Error", f"Failed to parse class table type: {str(e)}")
+            return
+        
+        # Load the template for this type
+        try:
+            # Get template from CT data handler
+            template = CTDataHandler.get_ct_template(type_id)
+            
+            # Create fields for each property
+            self.ct_field_vars = {}  # Store StringVars for each field
+            
+            # Create a container frame without scrolling (uses main window scrolling)
+            fields_container = Ctk.CTkFrame(
+                self.ct_fields_frame, 
+                fg_color="#E0E8F0",
+                border_width=1,
+                border_color="#B3C8DD"
+            )
+            fields_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+            
+            # Add a title for the properties section
+            props_title = Ctk.CTkLabel(
+                fields_container,
+                text="Class Table Properties",
+                font=("Arial", 12, "bold"),
+                text_color="#000033",
+                fg_color="#D5E3F0",
+                corner_radius=5
+            )
+            props_title.pack(fill=tk.X, padx=5, pady=5)
+            
+            # Sort properties for consistent display
+            sorted_props = sorted(template.items())
+            
+            # Create categories frame
+            categories_frame = Ctk.CTkFrame(fields_container, fg_color="#E0E8F0")
+            categories_frame.pack(fill=tk.X, padx=5, pady=5)
+            
+            # Create a single property frame for all fields
+            property_frame = Ctk.CTkFrame(categories_frame, fg_color="#E0E8F0")
+            property_frame.pack(fill=tk.X, padx=5, pady=5)
+            
+            # Assign properties to the frame, skipping Type category
+            for prop_name, prop_value in sorted_props:
+                # Skip the Type category as required
+                if prop_name == "Type":
+                    continue
+                    
+                # Create StringVar and store for later retrieval
+                var = tk.StringVar(value=prop_value)
+                self.ct_field_vars[prop_name] = var
+                
+                # Create row frame
+                row_frame = Ctk.CTkFrame(property_frame, fg_color="#E0E8F0")
+                row_frame.pack(fill=tk.X, padx=5, pady=2)
+                
+                # Property label
+                prop_label = Ctk.CTkLabel(
+                    row_frame,
+                    text=prop_name + ":",
+                    width=150,
+                    anchor="w",
+                    text_color="#2E2E3A",
+                    font=("Arial", 11)
+                )
+                prop_label.pack(side=tk.LEFT, padx=5, pady=3)
+                
+                # Property entry
+                prop_entry = Ctk.CTkEntry(
+                    row_frame,
+                    textvariable=var,
+                    width=180,  # Increased width for better visibility
+                    fg_color="#FFFFFF",
+                    text_color="#000000",
+                    border_width=1,
+                    border_color="#B3C8DD",
+                    font=("Arial", 11)
+                )
+                prop_entry.pack(side=tk.LEFT, padx=5, pady=5, fill=tk.X, expand=True)
+            
+            # Performance metric
+            elapsed_time = time.time() - loading_start_time
+            self.log_info(f"Loaded {len(self.ct_field_vars)} properties for class table type {type_id} in {elapsed_time:.2f} seconds")
+            
+        except Exception as e:
+            self.log_error(f"Error loading class table fields for type {type_id}", e)
+            # Create error message
+            error_label = Ctk.CTkLabel(
+                self.ct_fields_frame,
+                text=f"Error loading fields: {str(e)}",
+                font=("Arial", 12),
+                text_color="#FF0000",
+                fg_color="transparent"
+            )
+            error_label.pack(padx=10, pady=20)
+            
+    def _save_ct_template(self):
+        """Save the current class table template configuration.
+        
+        This method saves all current field values to the ct_templates.json file,
+        creating a new template or updating an existing one.
+        """
+        try:
+            # Start performance tracking
+            start_time = time.time()
+            
+            # Get the type ID from the selection string
+            selection = self.ct_type_var.get()
+            type_id = selection.split(":")[0].strip()
+            
+            # Create new template with current field values
+            new_template = {}
+            for field_name, string_var in self.ct_field_vars.items():
+                new_template[field_name] = string_var.get()
+            
+            # Save template using CT data handler
+            success = CTDataHandler.save_ct_template(type_id, new_template)
+            
+            if success:
+                # Log performance metrics
+                elapsed_time = time.time() - start_time
+                self.log_info(f"Saved template for class table type {type_id} in {elapsed_time:.2f} seconds")
+                messagebox.showinfo("Template Saved", f"Template for class table type {type_id} has been saved successfully.")
+            else:
+                messagebox.showerror("Error", f"Failed to save template for class table type {type_id}.")
+                
+        except Exception as e:
+            self.log_error("Error saving class table template", e)
+            messagebox.showerror("Error", f"Failed to save template: {str(e)}")
+    
+    def _reset_ct_fields(self):
+        """Reset class table fields to default values.
+        
+        This method sets all CT fields back to their default values, but doesn't save
+        the changes to the template file until the user clicks Save Template.
+        """
+        try:
+            # Get current selection
+            selection = self.ct_type_var.get()
+            
+            # Confirm with user
+            if messagebox.askyesno("Confirm Reset", "Are you sure you want to reset all fields to default values?"):
+                # Create a default template
+                default_template = CTDataHandler.create_default_ct_template()
+                
+                # Update all fields with default values
+                for field_name, string_var in self.ct_field_vars.items():
+                    if field_name in default_template:
+                        string_var.set(default_template[field_name])
+                    else:
+                        string_var.set("0")  # Default for unknown fields
+                
+                self.log_info("Reset all class table fields to default values")
+                messagebox.showinfo("Fields Reset", "All fields have been reset to default values.")
+        
+        except Exception as e:
+            self.log_error("Error resetting class table fields", e)
+            messagebox.showerror("Error", f"Failed to reset fields: {str(e)}")
+    
+    def _init_ct_interface(self):
+        """Initialize the interface for class table data.
+        
+        Creates all necessary UI elements for selecting and editing Class Table data.
+        """
+        # Load Class Table types using the CT data handler
+        self.ct_types = CTDataHandler.load_ct_types()
+        
+        # Create the CT type selection section
+        ct_type_frame = Ctk.CTkFrame(self.ct_frame, fg_color="#E0E8F0")
+        ct_type_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        # Title for CT type section
+        ct_type_title = Ctk.CTkLabel(
+            ct_type_frame,
+            text="Class Table Configuration",
+            font=("Arial", 14, "bold"),
+            text_color="#000033",
+            fg_color="transparent"
+        )
+        ct_type_title.pack(anchor="w", padx=10, pady=(10, 5))
+        
+        # CT type selection container
+        type_select_frame = Ctk.CTkFrame(ct_type_frame, fg_color="#E0E8F0")
+        type_select_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        # CT type label
+        type_label = Ctk.CTkLabel(
+            type_select_frame,
+            text="Class Table Type:",
+            width=120,
+            anchor="w",
+            text_color="#2E2E3A",
+            font=("Arial", 12)
+        )
+        type_label.pack(side=tk.LEFT, padx=(8, 0), pady=8)
+        
+        # CT type dropdown
+        self.ct_type_var = tk.StringVar(value=next(iter(self.ct_types.values())) if self.ct_types else "")
+        self.ct_type_dropdown = Ctk.CTkComboBox(
+            type_select_frame,
+            values=list(self.ct_types.values()),
+            variable=self.ct_type_var,
+            state="readonly",
+            width=250,
+            fg_color="#FFFFFF",
+            text_color="#000000",
+            button_color="#A1B9D0",
+            button_hover_color="#7A92A9",
+            border_width=1,
+            border_color="#B3C8DD",
+            dropdown_fg_color="#FFFFFF",
+            font=("Arial", 11),
+            command=self._load_ct_fields
+        )
+        self.ct_type_dropdown.pack(side=tk.LEFT, padx=8, pady=8)
+        
+        # Create fields frame for the CT properties
+        self.ct_fields_frame = Ctk.CTkFrame(self.ct_frame, fg_color="#E0E8F0", border_width=1, border_color="#B3C8DD")
+        self.ct_fields_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Add indicator showing data source
+        self.data_source_label = Ctk.CTkLabel(
+            self.ct_frame,
+            text="Data Source: ct_templates.json",
+            font=("Arial", 10),
+            text_color="#555555",
+            fg_color="transparent"
+        )
+        self.data_source_label.pack(anchor="se", padx=10, pady=(0, 5))
+        
+        # Buttons frame for save and default options
+        buttons_frame = Ctk.CTkFrame(self.ct_frame, fg_color="#E0E8F0")
+        buttons_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        # Save button for CT data
+        self.save_ct_button = Ctk.CTkButton(
+            buttons_frame,
+            text="Save Template",
+            command=self._save_ct_template,
+            fg_color="#A1B9D0",
+            hover_color="#7A92A9",
+            text_color="#000000",
+            height=35,
+            width=150,
+            corner_radius=8,
+            border_width=1,
+            border_color="#8AA2BC",
+            font=("Arial", 12)
+        )
+        self.save_ct_button.pack(side=tk.LEFT, padx=8, pady=8)
+        
+        # Default button for CT data
+        self.default_ct_button = Ctk.CTkButton(
+            buttons_frame,
+            text="Reset to Default",
+            command=self._reset_ct_fields,
+            fg_color="#A1B9D0",
+            hover_color="#7A92A9",
+            text_color="#000000",
+            height=35,
+            width=150,
+            corner_radius=8,
+            border_width=1,
+            border_color="#8AA2BC",
+            font=("Arial", 12)
+        )
+        self.default_ct_button.pack(side=tk.LEFT, padx=8, pady=8)
+    
+    def log_error(self, message, exception=None):
+        """Log an error and display a message to the user."""
+        # Log the error
+        logging.error(message)
+        if exception:
+            logging.error(f"Exception details: {str(exception)}")
+            error_message = f"{message}: {str(exception)}"
+        else:
+            error_message = message
+        
+        # Show error message to user
+        messagebox.showerror("Error", message)
+        
+        # Also log to console if parent has console_log method
+        if hasattr(self.parent, 'console_log'):
+            self.parent.console_log(error_message)
+    
+    def log_info(self, message):
+        """Log information and display a message to the user."""
+        # Log the info
+        logging.info(message)
+    
+    def _get_scrollable_content(self, scrollable_frame):
+        """Get the content frame from a scrollable frame."""
+        # Find the canvas within the scrollable frame
+        for child in scrollable_frame.winfo_children():
+            if isinstance(child, tk.Canvas):
+                canvas = child
+                break
+        else:
+            # If we didn't find a canvas, return the scrollable frame itself
+            return scrollable_frame
+        
+        # Find the inner frame within the canvas
+        for item_id in canvas.find_all():
+            if canvas.type(item_id) == "window":
+                # Get the window widget (which is our inner frame)
+                inner_frame = canvas.itemcget(item_id, "window")
+                if inner_frame:
+                    return canvas.nametowidget(inner_frame)
+        
+        # If we didn't find an inner frame, return the canvas
+        return canvas
+    
+    def _save_preset(self):
+        """Save current configuration as a preset by calling MainGui's save_config_file method."""
+        try:
+            # Check if we have a parent that has the save_config_file method
+            if hasattr(self.parent, 'save_config_file'):
+                self.parent.save_config_file()
+            else:
+                self.log_error("Cannot save preset: Parent window does not have save_config_file method", None)
+                messagebox.showerror("Error", "Cannot save preset: Parent window does not have save_config_file method")
+        except Exception as e:
+            self.log_error(f"Error saving preset: {str(e)}", e)
+    
+    def _load_preset(self):
+        """Load configuration preset by calling MainGui's load_config method."""
+        try:
+            # Check if we have a parent that has the load_config method
+            if hasattr(self.parent, 'load_config'):
+                self.parent.load_config()
+                
+                # Update UI elements if needed
+                self._update_ui_from_parent()
+            else:
+                self.log_error("Cannot load preset: Parent window does not have load_config method", None)
+                messagebox.showerror("Error", "Cannot load preset: Parent window does not have load_config method")
+        except Exception as e:
+            self.log_error(f"Error loading preset: {str(e)}", e)
+    
+    def _update_ui_from_parent(self):
+        """Update UI elements based on parent's shared_data."""
+        try:
+            # Check if parent has shared_data
+            if hasattr(self.parent, 'shared_data'):
+                # Update Auto-Start checkbox if parent has Startup in shared_data
+                if "Startup" in self.parent.shared_data:
+                    startup_value = self.parent.shared_data["Startup"].get()
+                    if startup_value and startup_value.lower() == 'true':
+                        self.auto_start_var.set(True)
+                    else:
+                        self.auto_start_var.set(False)
+                
+                # Update Debugger checkbox if parent has debugger in shared_data
+                if "debugger" in self.parent.shared_data:
+                    debugger_value = self.parent.shared_data["debugger"].get()
+                    self.debugger_var.set(debugger_value)
+                
+                # Update BMS path if parent has CTpath in shared_data
+                if "CTpath" in self.parent.shared_data:
+                    ct_path = self.parent.shared_data["CTpath"].get()
+                    if ct_path:
+                        self.bms_path_var.set(ct_path)
+                
+                # Update Backup KTO path if parent has backup_CTpath in shared_data
+                if "backup_CTpath" in self.parent.shared_data:
+                    backup_path = self.parent.shared_data["backup_CTpath"].get()
+                    if backup_path:
+                        self.backup_path_var.set(backup_path)
+        except Exception as e:
+            self.log_error(f"Error updating UI from parent: {str(e)}", e)
+    
+    def _toggle_auto_start(self):
+        """Toggle auto-start setting.
+        
+        Controls whether the application starts automatically when the system boots.
+        Connected to shared_data["Startup"] in MainGui.
+        """
+        # Update auto-start setting
+        try:
+            # Update parent's Auto_Load variable to match our checkbox state
+            if hasattr(self.parent, 'Auto_Load'):
+                self.parent.Auto_Load.set(self.auto_start_var.get())
+                
+            # Forward to parent if it has a method for this
+            if hasattr(self.parent, 'startup_selection_checkbox'):
+                self.parent.startup_selection_checkbox()
+            
+            # Provide feedback confirmation
+            status = "enabled" if self.auto_start_var.get() else "disabled"
+            self.log_info(f"Auto-start {status}")
+            
+        except Exception as e:
+            self.log_error(f"Error toggling auto-start: {str(e)}", e)
+    
+    def _configure_logger(self, log_level=None, log_handlers=None):
+        """Configure the application logger with the specified settings.
+        
+        This method sets up the root logger with the specified log level and handlers.
+        It provides a more robust logging system than the previous debugger toggle.
+        
+        Args:
+            log_level: The logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+            log_handlers: List of handlers to use ('console', 'file', or both)
+        """
+        try:
+            # Get logging level from argument or UI selection
+            level = log_level or self.log_level_var.get()
+            handlers = log_handlers or []
+            
+            # Determine which handlers to use based on log_type_var
+            if not handlers:
+                log_type = self.log_type_var.get()
+                if log_type == "Console Only":
+                    handlers = ['console']
+                elif log_type == "File Only":
+                    handlers = ['file']
+                elif log_type == "Console and File":
+                    handlers = ['console', 'file']
+            
+            # Convert level string to numeric value
+            numeric_level = getattr(logging, level)
+            
+            # Configure the root logger
+            root_logger = logging.getLogger()
+            root_logger.setLevel(numeric_level)
+            
+            # Remove all existing handlers
+            for handler in root_logger.handlers[:]:
+                root_logger.removeHandler(handler)
+            
+            # Create formatter
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            
+            # Add handlers as requested
+            if 'console' in handlers:
+                console_handler = logging.StreamHandler()
+                console_handler.setLevel(numeric_level)
+                console_handler.setFormatter(formatter)
+                root_logger.addHandler(console_handler)
+            
+            if 'file' in handlers:
+                # Ensure logs directory exists
+                logs_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")
+                os.makedirs(logs_dir, exist_ok=True)
+                
+                # Create file handler
+                log_file = os.path.join(logs_dir, "app.log")
+                file_handler = logging.FileHandler(log_file)
+                file_handler.setLevel(numeric_level)
+                file_handler.setFormatter(formatter)
+                root_logger.addHandler(file_handler)
+            
+            # Log confirmation
+            self.log_info(f"Logger configured with level: {level}, handlers: {', '.join(handlers)}")
+            
+            # Update parent's logging configuration if method exists
+            if hasattr(self.parent, 'update_logging_config'):
+                self.parent.update_logging_config(level, handlers)
+                
+        except Exception as e:
+            # Use print as a fallback in case logging is broken
+            logger.error(f"Error configuring logger: {str(e)}", e)
+    
+    def _open_console_window(self):
+        """Open console window by calling parent's open_console_window method."""
+        try:
+            # Check if we have a parent that has the open_console_window method
+            if hasattr(self.parent, 'open_console_window'):
+                self.parent.open_console_window()
+            else:
+                self.log_error("Cannot open console window: Parent window does not have open_console_window method", None)
+                messagebox.showerror("Error", "Cannot open console window: Parent window does not have open_console_window method")
+        except Exception as e:
+            self.log_error(f"Error opening console window: {str(e)}", e)
+    
+    def _save_and_destroy_task(self):
+        """Saves checkbox states and then destroys the window.
+        
+        This task is scheduled to run when the event loop is idle to improve
+        perceived responsiveness of the window closing.
+        """
+        task_start_time = time.perf_counter()
+        elapsed_task_start = task_start_time - self._creation_time
+        self.log_info(f"[{elapsed_task_start:.4f}s] Deferred task: _save_and_destroy_task started.")
+        
+        try:
+            save_start_time = time.perf_counter()
+            elapsed_before_save = save_start_time - self._creation_time
+            self.log_info(f"[{elapsed_before_save:.4f}s] Deferred task: Calling _save_checkbox_states().")
+            
+            self._save_checkbox_states() # Now this runs deferred
+            
+            save_end_time = time.perf_counter()
+            elapsed_after_save = save_end_time - self._creation_time
+            duration_save = save_end_time - save_start_time
+            self.log_info(f"[{elapsed_after_save:.4f}s] Deferred task: _save_checkbox_states() completed in {duration_save:.4f}s.")
+            
+        except Exception as e:
+            save_error_time = time.perf_counter()
+            elapsed_save_error = save_error_time - self._creation_time
+            self.log_error(f"[{elapsed_save_error:.4f}s] Error during deferred saving of checkbox states: {str(e)}", e)
+        finally:
+            # Ensure destroy is called even if saving fails or an error occurs during saving
+            if self.winfo_exists():
+                destroy_start_time = time.perf_counter()
+                elapsed_before_destroy = destroy_start_time - self._creation_time
+                self.log_info(f"[{elapsed_before_destroy:.4f}s] Deferred task: Calling self.destroy().")
+                try:
+                    self.destroy()
+                    destroy_end_time = time.perf_counter()
+                    elapsed_after_destroy = destroy_end_time - self._creation_time
+                    duration_destroy = destroy_end_time - destroy_start_time
+                    self.log_info(f"[{elapsed_after_destroy:.4f}s] Deferred task: Window destroyed successfully in {duration_destroy:.4f}s.")
+                except Exception as e_destroy:
+                    destroy_error_time = time.perf_counter()
+                    elapsed_destroy_error = destroy_error_time - self._creation_time
+                    self.log_error(f"[{elapsed_destroy_error:.4f}s] Error during deferred window destruction: {str(e_destroy)}", e_destroy)
+            else:
+                no_destroy_time = time.perf_counter()
+                elapsed_no_destroy = no_destroy_time - self._creation_time
+                self.log_info(f"[{elapsed_no_destroy:.4f}s] Deferred task: Window no longer exists, skipping destroy.")
+
+    def _on_close(self):
+        import sys
+        print("DEBUG: SettingsWindow._on_close() CALLED", file=sys.stderr)
+        """Schedules the window to save settings and then close.
+        
+        This method is called when the user closes the window. It immediately
+        schedules the saving of settings and window destruction to happen 
+        when the event loop is idle, making the window appear to close instantly.
+        """
+        try:
+            # Log the action immediately
+            elapsed_on_close = time.perf_counter() - self._creation_time
+            self.log_info(f"[{elapsed_on_close:.4f}s] Settings window close requested. Scheduling save and destroy task.")
+            
+            # Schedule the save and destroy operation to run when idle
+            self.after_idle(self._save_and_destroy_task)
+        except Exception as e:
+            self.log_error(f"Error in _on_close while scheduling save/destroy task: {str(e)}", e)
+            # Fallback: If scheduling itself fails, try to destroy immediately.
+            # This might hang if the original problem was in destroy(), but it's a last resort.
+            if self.winfo_exists():
+                try:
+                    self.log_info("Fallback: Attempting immediate destroy due to error in _on_close scheduling.")
+                    self.destroy()
+                except Exception as e_destroy:
+                    self.log_error(f"Error during fallback immediate destroy: {str(e_destroy)}", e_destroy)
+    
+    def _save_checkbox_states(self):
+        """Save the states of all checkboxes in the settings window.
+        
+        This ensures checkbox preferences are preserved between sessions.
+        """
+        try:
+            # Make sure the parent has shared_data
+            if hasattr(self.parent, 'shared_data'):
+                # Save backup BMS files checkbox state
+                backup_bms_value = "1" if self.backup_bms_var.get() else "0"
+                if 'backup_bms_files' in self.parent.shared_data:
+                    self.parent.shared_data['backup_bms_files'].set(backup_bms_value)
+                else:
+                    self.parent.shared_data['backup_bms_files'] = tk.StringVar(value=backup_bms_value)
+                
+                # Save backup features checkbox state
+                backup_features_value = "1" if self.backup_features_var.get() else "0"
+                if 'backup_features_files' in self.parent.shared_data:
+                    self.parent.shared_data['backup_features_files'].set(backup_features_value)
+                else:
+                    self.parent.shared_data['backup_features_files'] = tk.StringVar(value=backup_features_value)
+                
+                # Save auto-start checkbox state if it exists
+                if hasattr(self, 'auto_start_var'):
+                    auto_start_value = "1" if self.auto_start_var.get() else "0"
+                    if 'auto_start' in self.parent.shared_data:
+                        self.parent.shared_data['auto_start'].set(auto_start_value)
+                    else:
+                        self.parent.shared_data['auto_start'] = tk.StringVar(value=auto_start_value)
+                
+                self.log_info("Saved checkbox states to shared data")
+        except Exception as e:
+            self.log_error(f"Error saving checkbox states: {str(e)}", e)
+    
+    def _apply_logging_settings(self):
+        """Apply the logging settings from the UI controls.
+        
+        This method reads the current logging configuration from the UI controls
+        and applies them using the _configure_logger method.
+        """
+        # Get logging settings from UI controls
+        log_level_str = self.log_level_var.get()
+        log_method_ui_str = self.log_type_var.get() # This is the string from the UI, e.g., "Console Only"
+
+        # Translate UI string to handlers list and a storable simple string (like in config.json)
+        handlers = []
+        storable_log_method = "Console" # Default storable value
+        if log_method_ui_str == "Console Only":
+            handlers = ['console']
+            storable_log_method = "Console"
+        elif log_method_ui_str == "File Only":
+            handlers = ['file']
+            storable_log_method = "File"
+        elif log_method_ui_str == "Console and File":
+            handlers = ['console', 'file']
+            storable_log_method = "Both"
+        elif log_method_ui_str == "None":
+            handlers = [] # No handlers
+            storable_log_method = "None"
+        
+        # Apply the settings using the parent's update_logging_config method
+        if hasattr(self.parent, 'update_logging_config'):
+            self.parent.update_logging_config(level=log_level_str, handlers=handlers)
+            self.log_info(f"Applied logging settings: Level={log_level_str}, Method UI='{log_method_ui_str}' (Handlers: {handlers})")
+        else:
+            self.log_error("Parent does not have update_logging_config method.")
+            messagebox.showerror("Error", "Failed to apply logging settings: Parent context error.")
+            return
+
+        # Update shared_data in the parent (MainGui) with the storable simple string
+        if hasattr(self.parent, 'shared_data'):
+            if self.parent.shared_data.get("log_level"):
+                self.parent.shared_data["log_level"].set(log_level_str)
+            else: 
+                self.parent.shared_data["log_level"] = tk.StringVar(value=log_level_str)
+                
+            if self.parent.shared_data.get("logging_method"):
+                self.parent.shared_data["logging_method"].set(storable_log_method) # Save the simple form
+            else: 
+                self.parent.shared_data["logging_method"] = tk.StringVar(value=storable_log_method)
+            self.log_info("Updated shared_data with new logging settings.")
+        else:
+            self.log_error("Parent does not have shared_data attribute.")
+
+        # Create a simple message for the confirmation dialog
+        message = "Logging settings have been applied.\n\n"
+        message += f"Level: {log_level_str}\n"
+        message += f"Output: {log_method_ui_str}\n\n"
+        message += "The new settings are now active."
+        
+        # Show a confirmation message to the user
+        messagebox.showinfo("Logging Settings Applied", message)
+
+
+
+# For testing purposes only
+if __name__ == '__main__':
+    # Check if the SettingsWindow is a Toplevel window
+    if hasattr(tk, 'Toplevel') and issubclass(SettingsWindow, tk.Toplevel):
+        # Create a simple mock parent for the Toplevel window
+        class MockFrame(tk.Frame):
+            def __init__(self, master=None):
+                super().__init__(master)
+                # Create shared data for settings window
+                self.shared_data = {
+                    "CTpath": tk.StringVar(value="C:/BMS/User/Config"),
+                    "BMS_Database_Path": tk.StringVar(value="C:/BMS/Data"),
+                    "backup_CTpath": tk.StringVar(value="C:/BMS/Backup"),
+                    "Startup": tk.StringVar(),
+                    "debugger": tk.BooleanVar()
+                }
+            
+            def console_log(self, message):
+                logger.info(f"[CONSOLE] {message}")
+        
+        # Create root window
+        root = tk.Tk()
+        root.title("BMS Building Generator - Settings")
+        root.geometry("800x600")
+        
+        # Create parent frame
+        parent_frame = MockFrame(root)
+        parent_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Create a button to open settings
+        def open_settings():
+            settings_dialog = SettingsWindow(parent_frame)
+            root.wait_window(settings_dialog)
+        
+        open_button = tk.Button(parent_frame, text="Open Settings", command=open_settings)
+        open_button.pack(padx=20, pady=20)
+        
+        # Open settings dialog automatically for testing
+        root.after(100, open_settings)
+        
+        # Start the main loop
+        root.mainloop()
+    else:
+        logger.error("SettingsWindow is not a Toplevel widget. Unable to run standalone.")
+        sys.exit(1)
