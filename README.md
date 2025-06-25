@@ -1,130 +1,227 @@
-# Building Generator v1.1
+# Building Generator v1.5
 
-## Overview
+A powerful Python application for generating and managing building footprints for Falcon BMS simulation environments. This tool processes geospatial data from various sources and generates buildings compatible with Falcon BMS theaters.
 
-The Building Generator is a tool designed to assist theater creators in constructing custom Objectives for Falcon BMS. It facilitates the accurate placement of buildings and features from a selected database within the BMS environment.
+## 🚀 Features
 
-## Key Features
+### Core Functionality
 
-- **GeoData Import:** Loads building footprints and related data from GeoJSON files.
-- **Database Integration:** Connects to and utilizes a database of building models and features.
-- **Random & GeoJSON-Based Placement:** Supports feature placement using either random distribution or alignment with GeoJSON data.
-- **Customizable Parameters:** Allows users to adjust parameters like building height, size, rotation, and density.
-- **Automated Feature Selection**: Automatically detects proper models from Database by different types of building's attributes from GeoJson data for best type fitting
-- **Falcon BMS Compatibility:** Generates output files compatible with the Falcon BMS format.
-- **Graphical User Interface (GUI):** Provides an intuitive interface for easy operation.
-- **Statistics:** The GUI provides statistic and data about the generations and feature types used.
+- **Geospatial Data Processing**: Import and process GeoJSON building footprint data
+- **BMS Integration**: Direct injection of building data into Falcon BMS installations
+- **Advanced Filtering**: Filter buildings by various criteria including size, type, and location
+- **Multi-Source Support**: Compatible with Microsoft Building Footprints and Google Open Buildings
+- **Statistical Analysis**: Generate detailed statistics about building distributions
 
-## Dependencies
+### Advanced Features
 
-- Python 3.6+
-- Libraries
-  - geopandas
-  - numpy
-  - pyproj
-  - tkinter
-  - customtkinter
-  - matplotlib
-  - scipy
-  - pandas
-  - sqlite3
-  - re
-  - time
-  - gzip
-  - json
-  - math
-  - pathlib
-  - winreg
+- **Collision Detection**: Prevent overlapping buildings in generated layouts
+- **Template System**: Customizable templates for different building types
+- **Batch Processing**: Process multiple datasets efficiently
+- **Backup Management**: Automatic backup of original BMS files
+- **Real-time Preview**: 2D and 3D visualization of generated buildings
 
-## Installation
+### Version 1.5 Enhancements
 
-1. Ensure you have Python 3.6 or higher installed.
+- **Modular Architecture**: Completely redesigned with component-based structure
+- **Enhanced Settings Window**: Tabbed interface with comprehensive configuration options
+- **BMS Injection Window**: Dedicated interface for BMS objective configuration
+- **Improved Logging**: Configurable logging system with multiple output options
+- **JSON Data Management**: Centralized JSON file handling with validation
+- **Performance Optimizations**: Background processing and caching system
+
+## 📋 Requirements
+
+### System Requirements
+
+- **OS**: Windows 10/11 (Primary), Linux (Experimental)
+- **Python**: 3.8 or higher
+- **RAM**: 4GB minimum, 8GB recommended
+- **Storage**: 2GB free space for installation and data
+
+### Dependencies
+
+```bash
+pip install tkinter customtkinter numpy pandas geopandas matplotlib
+pip install shapely rtree pathlib lxml pillow
+```
+
+## 🔧 Installation
+
+1. **Download the latest release** from the releases section
+2. **Extract** the archive to your desired location
+3. **Install dependencies**:
+   
+   ```bash
+   pip install -r requirements.txt
+   ```
+4. **Run the application**:
+   
+   ```bash
+   python MainGui.py
+   ```
+
+## 📖 Quick Start
+
+### Basic Workflow
+
+1. **Load CT File**: Select your Falcon BMS Campaign Theater XML file
+2. **Import GeoData**: Load your building footprint GeoJSON file
+3. **Configure Settings**: Set generation parameters and filters
+4. **Generate Buildings**: Create building layouts with collision detection
+5. **Export Results**: Save as GeoJSON or inject directly into BMS
+
+### First Time Setup
+
+1. Open the application
+2. Go to Settings → Load Preset to configure initial paths
+3. Select your BMS installation directory
+4. Load a sample GeoJSON file to test functionality
+
+## 🎯 Key Improvements from v1.0 to v1.5
+
+### Architecture Overhaul
+
+- **Modular Design**: Separated functionality into components and utilities
+- **Clean Separation**: UI, logic, and data handling are now properly separated
+- **Extensible Framework**: Easy to add new features and data sources
+
+### User Experience
+
+- **Enhanced Settings**: Tabbed interface with better organization
+- **BMS Integration**: Direct injection capabilities with template management
+- **Improved Feedback**: Better error handling and user notifications
+- **Processing Windows**: Long-running operations with progress indicators
+
+### Technical Improvements
+
+- **Performance**: Background processing and caching for large datasets
+- **Reliability**: Comprehensive error handling and data validation
+- **Maintainability**: Clean code structure with proper documentation
+- **Logging**: Configurable logging system for debugging and monitoring
+
+## 📁 Project Structure
+
+```
+Building Generator/
+├── MainGui.py              # Main application entry point
+├── bms_injector.py         # BMS injection functionality
+├── MainCode.py             # Core business logic
+├── components/             # Modular components
+│   ├── settings_window.py  # Enhanced settings interface
+│   ├── bms_injection_window.py # BMS configuration window
+│   ├── objective_cache.py  # Caching system
+│   └── ...
+├── utils/                  # Utility modules
+│   ├── json_path_handler.py # JSON file management
+│   ├── file_manager.py     # File operations
+│   ├── logger.py          # Logging utilities
+│   └── config.py          # Configuration management
+├── data_components/        # Data and templates
+│   ├── objective_templates.json
+│   ├── ct_templates.json
+│   └── ...
+├── docs/                   # Documentation
+├── Assets/                 # UI assets and icons
+└── Generated/             # Output directory
+```
+
+## 🎮 BMS Integration
+
+The Building Generator provides seamless integration with Falcon BMS:
+
+### Supported BMS Versions
+
+- Falcon BMS 4.38+ 
+
+### Integration Features
+
+- **Direct Injection**: Generate buildings directly into BMS theaters
+- **Objective Management**: Create and manage BMS objectives
+- **Template System**: Customizable templates for different objective types
+- **Backup System**: Automatic backup of original BMS files
+
+## 🔧 Configuration
+
+### Settings Files
+
+- `config.json`: Main application configuration
+- `data_components/objective_templates.json`: BMS objective templates
+- `data_components/ct_templates.json`: Class Table templates
+- `data_components/ValuesDic.json`: Value mappings for building types
+
+### Key Configuration Options
+
+- **Auto-Start**: Automatically load previous session
+- **Logging**: Configure logging level and output
+- **Backup**: Control backup creation and management
+- **BMS Paths**: Set paths to BMS installation and data files
+
+## 📊 Data Sources
+
+### Supported Formats
+
+- **GeoJSON**: Primary format for building footprint data
+- **Microsoft Building Footprints**: Global building footprint dataset
+- **Google Open Buildings**: Open source building data
+- **QGIS**: Featuring extraction of Building data based on Opend Street Map (OSM)
+- **OverPass-Turbo**: Easy and fast Web UI for extraction data based on OSM
+
+### Data Processing
+
+- **Filtering**: Filter by size, type, location, and custom criteria
+- **Validation**: Automatic data validation and error correction
+- **Transformation**: Convert between coordinate systems and projections
+- **Optimization**: Spatial indexing for large datasets
+
+## 🛠️ Development
+
+### Getting Started
+
+1. Clone the repository
+2. Install development dependencies
+
+### Contributing
+
+- Follow the existing code style and structure
+- Add tests for new functionality
+- Update documentation for changes
+- Submit pull requests with clear descriptions
+
+## 📚 Documentation
+
+- **[User Guide](docs/User Guide.pdf)**: Comprehensive usage instructions
+- **[Changelog](CHANGELOG.md)**: Version history and changes
   
-2. Install the required libraries using pip:
-  
-  ```
-  pip install geopandas numpy pyproj tkinter customtkinter matplotlib scipy pandas
-  ```
-  
 
-## Usage
+## 🐛 Troubleshooting
 
-1. **Configure Settings:**
-  - Set the paths to the Class Table XML file (CT file).
-  - Specify the GeoJSON file containing building footprints.
-  - Optionally, load a projection file for theater-specific coordinate transformations.
-2. **Database Operations:**
-  - Generate a new database from the CT file.
-  - View and manage existing databases.
-3. **GeoData Operations:**
-  - Load GeoJSON data to populate the feature list.
-  - Adjust the floor height for building height calculations.
-4. **Operation Parameters:**
-  - Select between random and GeoJSON-based feature placement.
-  - Define restrictions to filter the buildings (by Names / Types)
-  - Define a radius and amount of object for random creation
-  - Set value and presence values or set them to use automatic mapping.
-5. **Generate Output:**
-  - Customize the output file name and save location.
-  - Generate the feature list for Falcon BMS.
+### Common Issues
 
-## File Structure
+- **BMS Path Not Found**: Ensure BMS installation path is correctly configured
+- **GeoJSON Loading Error**: Verify file format and coordinate system
+- **Memory Issues**: Reduce dataset size or enable data streaming
+- **Permission Errors**: Run as administrator for BMS file modifications
+- **Wrong Representation**: Showing extracted data from within the program may be wrong by undetected glitch. Features will anyway fitted correctly by their bonding box in BMS.
 
-- `MainGui.py`: Main GUI application file.
-- `Load_Geo_File.py`: Handles loading and processing GeoJSON files.
-- `MainCode.py`: Contains the core logic for feature assignment, saving, and statistics.
-- `Database.py`: Includes functions for generating the feature database.
-- `OSMLegend.py`: Displays the OSM legend.
-- `Restrictions.py`: Manages database restrictions
-- `InternalConsole.py`: Manages console output
-- `ValuesDictionary.py`: Manages values for object creation
-- `Assets/`: Contains GUI assets (images, icons).
+### Support
 
-## Code Description
+- Check the [User Guide](docs/User Guide.pdf) for detailed instructions
+- Review log files in the `logs/` directory
+- Report issues with detailed error messages and system information
 
-### Load\_Geo\_File.py
+## 📄 License
 
-This script contains functions for loading and processing geospatial data from a GeoJSON file.
+This project is licensed under the MIT License - see the LICENSE file for details.
 
-- `get_field_value(row, field_names, special=None)`: Extracts the first non-null value from a list of field names in a GeoPandas row.
-- `get_height_value(value)`: Checks for valid height or height level values.
-- `projection(coordinations, string)`: Applies a coordinate projection from WGS84 to a custom projection.
-- `Load_Geo_File(json_path, debugger=False, projection_string=None, floor_height=2.286)`: Loads a GeoJSON file, extracts feature information, applies projection (if specified), and calculates feature attributes.
+## 🙏 Acknowledgments
 
-### MainCode.py
+- Falcon BMS Community for testing and feedback
+- Microsoft Building Footprints team for global building data
+- Google Open Buildings project for open source building data
+- Python geospatial community for excellent tools and libraries
 
-This script implements the main algorithms for feature selection, placement, and saving to a file format compatible with Falcon BMS.
+---
 
-- `Load_Db(path, feature_name="All")`: Loads a database from a SQLite file based on different filtering
-- `Show_Selected_Features(buildings, Calc_data)`: Display the features that have been selected from Geo Data
-- `Show_Selected_Features_2D(plot_option, buildings=None, Calc_data=None, feature_entries=None,models_FrameData=None)`: Display the 2D features that have been selected from Geo Data or from models
-- `Show_Selected_Features_3D(plot_option,buildings=None, Calc_data=None,feature_entries=None,models_FrameData=None)`: Display the 3D features that have been selected from Geo Data or from models
-- `filter_structures(Geo_Data, Raw_Geo_Data, Num_Of_Structures, selection_option="Total Size")`: Selects a subset of structures from a given dataframe based on a probabilistic algorithm.
-- `Decision_Algo(GeoFeature, GeoFeatureData, Geo_Idx, selected_BMSModels, floor_height, State, num_floors=0)`: Finds the most appropriate BMS model based on given criteria.
-- `Rotation_Definer(Angle, BMS_Length_idx)`: Assigns a fixed angle for rotation based on the longest side of the model.
-- `Assign_features_randomly(num_features, radius, DB_path, DB_restrictions)`: Randomly selects features and generates random coordinates within a specified radius.
-- `Save_random_features(...)`: Saves randomly generated features to a file in the Falcon BMS format.
-- `Assign_features_accuratly(...)`: Fills features according to criterias
-- `Save_accurate_features(...)`: Saves accurately generated features to a file in the Falcon BMS format.
-- `get_value(Values_i, Values_f, model_type)`: Gets a value based on input parameters and values dictionary.
-- `write_to_file(SavePath, BuildingGeneratorVer, AOI_center, num_features, feature_entries)`: Writes feature entries to a file.
-- `format_entry(...)`: Formats a feature entry string.
-- `load_values_dict()`: Loads values dictionary from a JSON file.
-- `sort_feature_entries(feature_entries, sort_option)`: Sorts the feature entries based on the specified option.
-- `save_statistics(stats)`: Saves statistics to a gzipped JSON file.
-- `update_statistics(num_features, feature_types)`: Updates statistics.
-- `load_statistics()`: Loads statistics from a gzipped JSON file.
-- `Auto_Selected(Db_path, Selected_GeoFeature)`: Automatically detects possible keys in the GeoFeature and loading a proper Models from the Database for better type fitting
-- `split_string(s)`: Splits a string by multiple delimiters and returns a list of lowercase terms.
-
-### MainGui.py
-
-This script defines the GUI using `tkinter` and `customtkinter`.
-
-## Contributing
-
-Contributions are welcome!
-
-## License
-
-[MIT License](LICENSE)
+**Version**: 1.5.0  
+**Last Updated**: June 2025  
+**Compatibility**: Falcon BMS 4.35+, Python 3.8+ 
