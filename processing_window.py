@@ -9,6 +9,9 @@ import os
 from enum import Enum
 from typing import Callable, Optional, Any, Dict, Union
 
+# Set up logging - use standard pattern to inherit from main application
+logger = logging.getLogger(__name__)
+
 class ProcessType(Enum):
     """Enum of process types that can use the ProcessingWindow"""
     OBJECTIVE_TEMPLATE_GENERATION = "objective_template_generation"
@@ -35,6 +38,7 @@ class ProcessingWindow:
         show_progress: bool = False,
         show_details: bool = False
     ):
+        logger.debug(f"Initializing ProcessingWindow: title='{title}', size={width}x{height}")
         self.parent = parent
         self.title = title
         self.message = message
@@ -65,7 +69,7 @@ class ProcessingWindow:
         except AttributeError as e:
             # Handle CustomTkinter scaling issues by patching the missing method
             if "block_update_dimensions_event" in str(e):
-                print("[PROCESSING WINDOW] Handling CustomTkinter scaling issue")
+                logger.debug("Handling CustomTkinter scaling issue in window creation")
                 # Add the missing method as a no-op function to prevent errors
                 setattr(self.window.tk, 'block_update_dimensions_event', lambda: None)
                 # Try again after patching
@@ -185,7 +189,7 @@ class ProcessingWindow:
         except AttributeError as e:
             # Handle CustomTkinter scaling issues
             if "block_update_dimensions_event" in str(e):
-                print("[PROCESSING WINDOW] Handling CustomTkinter scaling issue in center_window")
+                logger.debug("Handling CustomTkinter scaling issue in center_window")
                 # Add the missing method as a no-op function
                 setattr(self.window.tk, 'block_update_dimensions_event', lambda: None)
                 try:
@@ -206,11 +210,11 @@ class ProcessingWindow:
                     self.window.geometry(f"{self.width}x{self.height}+{x}+{y}")
                 except Exception as nested_e:
                     # If still fails, use a default position
-                    print(f"[PROCESSING WINDOW] Could not center window: {nested_e}")
+                    logger.warning(f"Could not center window: {nested_e}")
                     self.window.geometry(f"{self.width}x{self.height}+100+100")
             else:
                 # Other attribute errors, just use default positioning
-                print(f"[PROCESSING WINDOW] Error in center_window: {e}")
+                logger.warning(f"Error in center_window: {e}")
                 self.window.geometry(f"{self.width}x{self.height}+100+100")
         
         # Geometry is already set in the try/except blocks
@@ -218,6 +222,7 @@ class ProcessingWindow:
     def update_message(self, message: str):
         """Update the message displayed in the window."""
         if self.is_open:
+            logger.debug(f"Updating processing window message: {message}")
             # Use after method to ensure thread safety when updating from worker thread
             self.window.after(0, lambda: self._update_message_safe(message))
     
@@ -238,6 +243,7 @@ class ProcessingWindow:
         if not self.show_progress or not self.is_open:
             return
             
+        logger.debug(f"Updating progress: {current}/{maximum if maximum else self.max_progress}")
         # Use after method to ensure thread safety when updating from worker thread
         self.window.after(0, lambda: self._update_progress_safe(current, maximum))
     
@@ -312,6 +318,7 @@ class ProcessingWindow:
     def close(self):
         """Close the processing window."""
         if self.is_open:
+            logger.debug(f"Closing processing window: {self.title}")
             # Use after method to ensure thread safety when closing from worker thread
             self.window.after(0, self._close_safe)
     
@@ -361,6 +368,8 @@ def run_with_processing(parent, task_function, title="Processing", message="Plea
     import logging
     import traceback
     
+    logger.info(f"Starting background task with processing window: {title}")
+    
     # Use standard tkinter Toplevel instead of CustomTkinter to avoid scaling issues
     processing_window = tk.Toplevel(parent)
     processing_window.title(title)
@@ -377,8 +386,9 @@ def run_with_processing(parent, task_function, title="Processing", message="Plea
         x = px - (width // 2)
         y = py - (height // 2)
         processing_window.geometry(f"{width}x{height}+{x}+{y}")
+        logger.debug(f"Created processing window '{title}' at position {x},{y}")
     except Exception as e:
-        print(f"[PROCESSING WINDOW] Error centering window: {e}")
+        logger.warning(f"Error centering window: {e}")
         processing_window.geometry(f"{width}x{height}+100+100")
     
     # Configure grid
@@ -425,8 +435,8 @@ def run_with_processing(parent, task_function, title="Processing", message="Plea
                 # Handle exceptions from the task - reduced verbosity
                 import traceback
                 # Just log errors instead of printing them
-                logging.getLogger(__name__).error(f"Error in task execution: {e}")
-                logging.getLogger(__name__).debug(traceback.format_exc())
+                logger.error(f"Error in task execution: {e}")
+                logger.debug(traceback.format_exc())
                 # In case of an error, return False to indicate failure
                 task_result = False
             
@@ -447,8 +457,9 @@ def run_with_processing(parent, task_function, title="Processing", message="Plea
         try:
             processing_window.grab_release()
             processing_window.destroy()
+            logger.debug("Processing window closed successfully")
         except Exception as e:
-            print(f"[PROCESSING WINDOW] Error closing window: {e}")
+            logger.warning(f"Error closing window: {e}")
     
     # Handler for errors
     def error_handler():
@@ -456,7 +467,7 @@ def run_with_processing(parent, task_function, title="Processing", message="Plea
             processing_window.grab_release()
             processing_window.destroy()
         except Exception as e:
-            print(f"[PROCESSING WINDOW] Error closing window: {e}")
+            logger.warning(f"Error closing window: {e}")
             
         try:
             error_details = traceback.format_exc()
@@ -470,13 +481,14 @@ def run_with_processing(parent, task_function, title="Processing", message="Plea
             )
             
             # Log the error
-            logging.getLogger(__name__).error(f"Error in background task: {error_details}")
+            logger.error(f"Error in background task: {error_details}")
         except Exception as e:
-            print(f"[PROCESSING WINDOW] Error showing error message: {e}")
+            logger.warning(f"Error showing error message: {e}")
     
     # Start the background thread
     thread = threading.Thread(target=background_task)
     thread.daemon = True  # Thread will be terminated when main thread exits
+    logger.debug(f"Starting background thread for task: {title}")
     thread.start()
     
     # Wait for the result or error (blocking)
@@ -554,8 +566,8 @@ def run_template_generation(parent, task_function, process_type, title=None, mes
     Returns:
         The result of the task function
     """
-    # Print debug info about the process type to track loading
-    print(f"[PROCESSING WINDOW] Starting template generation with process type: {process_type.name}")
+    # Log debug info about the process type to track loading
+    logger.debug(f"Starting template generation with process type: {process_type.name}")
     
     # Set defaults based on process type
     if process_type == ProcessType.OBJECTIVE_TEMPLATE_GENERATION:
@@ -573,7 +585,7 @@ def run_template_generation(parent, task_function, process_type, title=None, mes
     message = message or default_message
     
     # Run the task with a standard processing window
-    print(f"[PROCESSING WINDOW] Running task with processing window: {title}")
+    logger.info(f"Running task with processing window: {title}")
     result = run_with_processing(
         parent=parent,
         task_function=task_function,
@@ -585,5 +597,5 @@ def run_template_generation(parent, task_function, process_type, title=None, mes
         width=350,           # Standard width
         height=120           # Standard height
     )
-    print(f"[PROCESSING WINDOW] Task completed for {process_type.name}")
+    logger.debug(f"Task completed for {process_type.name}")
     return result

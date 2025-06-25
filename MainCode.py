@@ -4,6 +4,7 @@ import gzip
 import json
 import math
 import sqlite3
+import traceback
 import numpy as np
 import pandas as pd
 from tkinter import messagebox
@@ -27,7 +28,15 @@ def Load_Db(path, feature_name="All"):
     --numbers will be classified as "types" and names would be matched by the actual name
     --if "ModelNum" is present, every number would be extracted from the model number"""
 
-    conn = sqlite3.connect(path)
+    logger.debug(f"Loading database from path: {path} with feature_name: {feature_name}")
+    
+    try:
+        conn = sqlite3.connect(path)
+        logger.debug(f"Successfully connected to database: {path}")
+    except Exception as e:
+        logger.error(f"Failed to connect to database {path}: {str(e)}")
+        raise
+    
     # Get all items divided by comma
     Allitems = [item.strip() for item in feature_name.split(",")]
 
@@ -38,6 +47,7 @@ def Load_Db(path, feature_name="All"):
     set_Allitems = set(Allitems)
     if set_Allitems.issubset(AllModels) and len(Allitems) == 1:
         query = "SELECT * FROM MyTable"
+        logger.debug("Using query for all models")
 
     elif "ModelNum" in Allitems:
         # get only the numbers inside the
@@ -48,6 +58,7 @@ def Load_Db(path, feature_name="All"):
         )
         # Combine the conditions
         query = f"SELECT * FROM MyTable WHERE {number_conditions}"
+        logger.debug(f"Using ModelNum query with {len(numbers)} numbers")
 
     else:
         # Separate words and numbers
@@ -63,14 +74,24 @@ def Load_Db(path, feature_name="All"):
         # Combine the conditions
         if word_conditions and number_conditions:
             query = f"SELECT * FROM MyTable WHERE ({word_conditions}) OR ({number_conditions})"
+            logger.debug(f"Using combined query with {len(words)} words and {len(numbers)} numbers")
         elif word_conditions:
             query = f"SELECT * FROM MyTable WHERE {word_conditions}"
+            logger.debug(f"Using word-based query with {len(words)} words")
         elif number_conditions:
             query = f"SELECT * FROM MyTable WHERE {number_conditions}"
+            logger.debug(f"Using number-based query with {len(numbers)} numbers")
 
-    dataframe = pd.read_sql_query(query, conn)
-
-    conn.close()
+    try:
+        dataframe = pd.read_sql_query(query, conn)
+        logger.debug(f"Query executed successfully, retrieved {len(dataframe)} rows")
+    except Exception as e:
+        logger.error(f"Database query failed: {str(e)}")
+        logger.error(f"Query was: {query}")
+        conn.close()
+        raise
+    finally:
+        conn.close()
 
     # get size
     num_rows, num_cols = dataframe.shape
@@ -80,7 +101,8 @@ def Load_Db(path, feature_name="All"):
 
     # Get the CT numbers and feature names for the selected indices
     random_dataframe = dataframe.iloc[selected_indices]
-
+    
+    logger.info(f"Loaded {num_rows} features from database for feature_name: {feature_name}")
     return random_dataframe
 
 
@@ -688,8 +710,7 @@ def Show_Selected_Features_3D(
 def filter_structures(
     Geo_Data, Raw_Geo_Data, Num_Of_Structures, selection_option="Total Size"
 ):
-    """
-    Selects a subset of structures from a given dataframe based on a probabilistic algorithm.
+    """Extracts structures from GeoJSON data based on the maximum total size of components.
 
     Parameters:
     - Geo_Data (pandas.DataFrame): Input dataframe containing information about Geodata.
@@ -705,53 +726,136 @@ def filter_structures(
     - 'Mix': Probability is influenced by both size and distance.
     - 'Random': structures are randomly selected without considering probabilities
     """
+    
+    # Log function entry with key parameters
+    logging.info(f"Starting structure filtering with selection option: '{selection_option}'")
+    logging.info(f"Input data: {len(Geo_Data)} structures, requesting {Num_Of_Structures} structures")
+    logging.debug(f"Geo_Data shape: {Geo_Data.shape}, Raw_Geo_Data shape: {Raw_Geo_Data.shape}")
 
     # Extract relevant columns from the dataframe
     data = Geo_Data[
         ["Surface Size (feet^2)", "Height (feet)", "XXX Cords", "YYY Cords"]
     ].values
+    logging.debug(f"Extracted coordinate and size data array with shape: {data.shape}")
+    
     # Calculate the selection criteria
     if selection_option == "Height":
         # Sort based on height
+        logging.info("Using Height-based selection criteria")
         selection_criteria = Geo_Data["Height (feet)"]
+        logging.debug(f"Height range: {selection_criteria.min():.2f} to {selection_criteria.max():.2f} feet")
+        
     elif selection_option == "Area":
         # Sort based on area
+        logging.info("Using Area-based selection criteria")
         selection_criteria = Geo_Data["Surface Size (feet^2)"]
+        logging.debug(f"Area range: {selection_criteria.min():.2f} to {selection_criteria.max():.2f} sq ft")
+        
     elif selection_option == "Total Size":
         # Sort based on height and total size
+        logging.info("Using Total Size (height × area) selection criteria")
         selection_criteria = (
             Geo_Data["Height (feet)"] * Geo_Data["Surface Size (feet^2)"]
         )
+        logging.debug(f"Total size range: {selection_criteria.min():.2f} to {selection_criteria.max():.2f}")
 
     elif selection_option == "Centerness":
-        # Sort based on distance from the center of the cluster
+        # Sort based on normal distribution probability from the center of the cluster
+        logging.info("Using Normal Distribution-based Centerness selection criteria")
         mean = np.mean(data[:, 2:], axis=0)
+        logging.debug(f"Cluster center coordinates: ({mean[0]:.2f}, {mean[1]:.2f})")
         distances = np.linalg.norm(data[:, 2:] - mean, axis=1)
-        selection_criteria = 1 / (1 + distances)
+        logging.debug(f"Distance range from center: {distances.min():.2f} to {distances.max():.2f}")
+        
+        # Calculate sigma as a fraction of the data spread for adaptive scaling
+        # Use 75th percentile distance as sigma to capture most of the data distribution
+        sigma = np.percentile(distances, 75) if len(distances) > 0 else 1.0
+        if sigma == 0:  # Handle edge case where all points are at the center
+            sigma = 1.0
+        logging.debug(f"Normal distribution sigma (75th percentile): {sigma:.2f}")
+        
+        # Apply normal distribution: higher probability for closer points, but with gradual falloff
+        # Use Gaussian function: exp(-(distance^2)/(2*sigma^2))
+        centerness_probabilities = np.exp(-(distances**2) / (2 * sigma**2))
+        logging.debug(f"Centerness probabilities range: {centerness_probabilities.min():.4f} to {centerness_probabilities.max():.4f}")
+        
+        # Add small random component for randomness while preserving distance-based preference
+        # Scale random component to be 10% of the probability range
+        prob_range = centerness_probabilities.max() - centerness_probabilities.min()
+        random_component = np.random.uniform(0, prob_range * 0.1, len(centerness_probabilities))
+        selection_criteria = centerness_probabilities + random_component
+        logging.debug(f"Final centerness scores (with randomness): {selection_criteria.min():.4f} to {selection_criteria.max():.4f}")
+        logging.info(f"Applied normal distribution with σ={sigma:.2f} and 10% randomness component")
 
     elif selection_option == "Mix":
-        # Sort based on both size and distance
+        # Sort based on both size and normal distribution-based distance
+        logging.info("Using Mixed (size + normal distribution centerness) selection criteria")
         mean = np.mean(data[:, 2:], axis=0)
+        logging.debug(f"Cluster center coordinates: ({mean[0]:.2f}, {mean[1]:.2f})")
         distances = np.linalg.norm(data[:, 2:] - mean, axis=1)
-        selection_criteria = (1 / (1 + distances)) * (
-            Geo_Data["Height (feet)"] * Geo_Data["Surface Size (feet^2)"]
-        )
+        logging.debug(f"Distance range from center: {distances.min():.2f} to {distances.max():.2f}")
+        
+        # Calculate size component
+        size_component = Geo_Data["Height (feet)"] * Geo_Data["Surface Size (feet^2)"]
+        logging.debug(f"Size component range: {size_component.min():.2f} to {size_component.max():.2f}")
+        
+        # Calculate enhanced centerness component using normal distribution
+        sigma = np.percentile(distances, 75) if len(distances) > 0 else 1.0
+        if sigma == 0:  # Handle edge case where all points are at the center
+            sigma = 1.0
+        logging.debug(f"Normal distribution sigma (75th percentile): {sigma:.2f}")
+        
+        # Apply normal distribution for centerness
+        centerness_probabilities = np.exp(-(distances**2) / (2 * sigma**2))
+        logging.debug(f"Centerness probabilities range: {centerness_probabilities.min():.4f} to {centerness_probabilities.max():.4f}")
+        
+        # Add randomness to centerness component (5% for mix to balance with size)
+        prob_range = centerness_probabilities.max() - centerness_probabilities.min()
+        random_component = np.random.uniform(0, prob_range * 0.05, len(centerness_probabilities))
+        centerness_component = centerness_probabilities + random_component
+        
+        # Combine size and enhanced centerness
+        selection_criteria = centerness_component * size_component
+        logging.debug(f"Mixed criteria range: {selection_criteria.min():.2f} to {selection_criteria.max():.2f}")
+        logging.info(f"Applied normal distribution with σ={sigma:.2f}, 5% randomness, and size weighting")
 
     elif selection_option == "Random":
         # Randomly shuffle the indices
+        logging.info("Using Random selection criteria")
         selection_criteria = np.random.rand(len(Geo_Data))
+        logging.debug(f"Generated {len(selection_criteria)} random values for selection")
 
     # Sort the data based on the selection criteria
+    logging.debug("Sorting structures based on selection criteria")
     sorted_indices = np.argsort(selection_criteria)
 
     # Select the top amount of structures with the highest selection criteria
+    original_request = Num_Of_Structures
     Num_Of_Structures = min(
         Num_Of_Structures, len(Geo_Data), 256
     )  # Limit to dataframe size
+    
+    if Num_Of_Structures != original_request:
+        logging.warning(f"Requested {original_request} structures, but limited to {Num_Of_Structures} (available: {len(Geo_Data)}, max: 256)")
+    else:
+        logging.info(f"Selecting top {Num_Of_Structures} structures based on criteria")
+        
     selected_indices = sorted_indices[-Num_Of_Structures:]
+    logging.debug(f"Selected indices range: {selected_indices.min()} to {selected_indices.max()}")
+
+    # Log selection results
+    if len(selected_indices) > 0:
+        selected_criteria_values = selection_criteria.iloc[selected_indices] if hasattr(selection_criteria, 'iloc') else selection_criteria[selected_indices]
+        logging.info(f"Selected {len(selected_indices)} structures with criteria values from {selected_criteria_values.min():.4f} to {selected_criteria_values.max():.4f}")
+    else:
+        logging.warning("No structures were selected")
 
     # Return a new dataframe with the selected structures
-    return Raw_Geo_Data.iloc[selected_indices], Geo_Data.iloc[selected_indices]
+    filtered_raw = Raw_Geo_Data.iloc[selected_indices]
+    filtered_geo = Geo_Data.iloc[selected_indices]
+    logging.info(f"Structure filtering completed successfully - returned {len(filtered_raw)} structures")
+    
+    return filtered_raw, filtered_geo
 
 
 def Decision_Algo(
@@ -2052,173 +2156,269 @@ def load_statistics():
 
 def Auto_Selected(Db_path, Selected_GeoFeature):
     """The function detects possible keys in the GeoFeature and loading a proper Models from the Database for better type fitting"""
+    logger.debug(f"Auto_Selected called with GeoFeature keys: {list(Selected_GeoFeature.keys())}")
+    
     fillters = []
 
+    # Check for direct BMS type specification
     if Selected_GeoFeature["bms"]:
+        logger.debug(f"Direct BMS type specified: {Selected_GeoFeature['bms']}")
         Accurate_filltered_BMSmodels = Load_Db(Db_path, str(Selected_GeoFeature["bms"]))
         if not Accurate_filltered_BMSmodels.empty:
+            logger.info(f"Found {len(Accurate_filltered_BMSmodels)} direct BMS models for type '{Selected_GeoFeature['bms']}'")
             return Accurate_filltered_BMSmodels
+        else:
+            logger.warning(f"No BMS models found for direct type '{Selected_GeoFeature['bms']}'")
 
+    # Sports facilities
     stadium = ["stadium", "ice_rink", "sports_centre", "sports_hall"]
     if (Selected_GeoFeature["leisure"] and any(s in split_string(Selected_GeoFeature["leisure"]) for s in stadium)) or Selected_GeoFeature["sport"]:
         fillters.extend(["66", "sport"])
+        logger.debug("Added sports facility filters")
 
+    # Religious buildings
     if Selected_GeoFeature["religion"]:
         religion_terms = split_string(Selected_GeoFeature["religion"])
+        logger.debug(f"Processing religion terms: {religion_terms}")
         if "muslim" in religion_terms:
             fillters.extend(["minaret", "mosque"])
+            logger.debug("Added Muslim religious filters")
         elif "jewish" in religion_terms:
             fillters.extend(["synagogue"])
+            logger.debug("Added Jewish religious filters")
         elif "christian" in religion_terms:
             fillters.extend(["church", "presbytery", "cathedral", "chapel"])
+            logger.debug("Added Christian religious filters")
         elif "buddhist" in religion_terms or "shinto" in religion_terms:
             fillters.extend(["temple", "shrine", "monastery"])
+            logger.debug("Added Buddhist/Shinto religious filters")
         else:
             fillters.extend(["7", "40"])
+            logger.debug("Added generic religious filters")
 
+    # Building types
     if Selected_GeoFeature["building"]:
         building_terms = split_string(Selected_GeoFeature["building"])
+        logger.debug(f"Processing building terms: {building_terms}")
         if "hangar" in building_terms:
             fillters.extend(["has", "hangar", "ft shelter"])
+            logger.debug("Added hangar filters")
         elif any(term in building_terms for term in ["mosque", "minaret", "muslim"]):
             fillters.extend(["minaret", "mosque"])
+            logger.debug("Added mosque filters")
         if any(term in building_terms for term in ["cathedral", "chapel", "presbytery"]):
             fillters.extend(["church", "presbytery", "cathedral", "chapel", "monastery"])
+            logger.debug("Added church filters")
         if "warehouse" in building_terms:
             fillters.extend(["12", "warehouse"])
+            logger.debug("Added warehouse filters")
         if "synagogue" in building_terms:
             fillters.extend(["synagogue"])
+            logger.debug("Added synagogue filters")
         if "shrine" in building_terms:
             fillters.extend(["shrine"])
+            logger.debug("Added shrine filters")
         if "temple" in building_terms:
             fillters.extend(["temple", "monastery"])
+            logger.debug("Added temple filters")
 
+    # Aeroway facilities
     if Selected_GeoFeature["aeroway"]:
         aeroway_terms = split_string(Selected_GeoFeature["aeroway"])
+        logger.debug(f"Processing aeroway terms: {aeroway_terms}")
         heli = ["heliport", "helipad"]
         if "terminal" in aeroway_terms:
             fillters.extend(["terminal"])
+            logger.debug("Added terminal filters")
         if "apron" in aeroway_terms:
             fillters.extend(["39", "45", "hangar", "terminal", "depot", "warehouse"])
+            logger.debug("Added apron filters")
         if any(term in aeroway_terms for term in heli):
             fillters.extend(["helipad", "13"])
+            logger.debug("Added helipad filters")
         elif "windsock" in aeroway_terms:
             fillters.extend(["windsock"])
+            logger.debug("Added windsock filters")
         elif "arresting_gear" in aeroway_terms:
             fillters.extend(["68"])
+            logger.debug("Added arresting gear filters")
         elif "navigationaid" in aeroway_terms:
             fillters.extend(["25", "localizer", "tacan", "beacon"])
+            logger.debug("Added navigation aid filters")
         elif "tower" in aeroway_terms:
             fillters.extend(["2"])
+            logger.debug("Added control tower filters")
 
+    # Barriers
     if Selected_GeoFeature["barrier"]:
         barrier_terms = split_string(Selected_GeoFeature["barrier"])
+        logger.debug(f"Processing barrier terms: {barrier_terms}")
         if "border_control" in barrier_terms:
             fillters.extend(["55"])
+            logger.debug("Added border control filters")
         if "fence" in barrier_terms:
             fillters.extend(["49"])
+            logger.debug("Added fence filters")
 
+    # Man-made structures
     if Selected_GeoFeature["man_made"]:
         man_made_terms = split_string(Selected_GeoFeature["man_made"])
+        logger.debug(f"Processing man_made terms: {man_made_terms}")
         fire_poles = ["flare", "chimney"]
         if "beacon" in man_made_terms:
             fillters.extend(["beacon"])
+            logger.debug("Added beacon filters")
         elif any(term in man_made_terms for term in fire_poles):
             fillters.extend(["61", "51", "release value"])
+            logger.debug("Added fire/chimney filters")
         elif "lighting" in man_made_terms:
             fillters.extend(["46", "lights", "light"])
+            logger.debug("Added lighting filters")
 
+    # Towers
     if Selected_GeoFeature["tower"]:
         tower_terms = split_string(Selected_GeoFeature["tower"])
+        logger.debug(f"Processing tower terms: {tower_terms}")
         watch_tower = ["watchtower", "observation"]
         antennas = ["monitoring", "communication", "na"]
         if any(term in tower_terms for term in watch_tower):
             fillters.extend(["watchtower"])
+            logger.debug("Added watchtower filters")
         if any(term in tower_terms for term in antennas):
             fillters.extend(["radio tower", "telecom tower"])
+            logger.debug("Added antenna tower filters")
         if "lighting" in tower_terms:
             fillters.extend(["46", "lights", "light"])
+            logger.debug("Added lighting tower filters")
         if "minaret" in tower_terms:
             fillters.extend(["minaret", "mosque"])
+            logger.debug("Added minaret filters")
         if "radar" in tower_terms:
             fillters.extend(["radar"])
+            logger.debug("Added radar filters")
         if "control" in tower_terms or "traffic" in tower_terms:
             fillters.extend(["2"])
+            logger.debug("Added control tower filters")
     elif Selected_GeoFeature["man_made"]:
         man_made_terms = split_string(Selected_GeoFeature["man_made"])
         antennas = ["communications_tower", "antenna", "satellite_dish", "telescope"]
         if "tower" in man_made_terms:
             if Selected_GeoFeature["service"] and "aircraft_control" in split_string(Selected_GeoFeature["service"]):
                 fillters.extend(["2"])
+                logger.debug("Added aircraft control tower filters")
             else:
                 fillters.extend(["61", "tower"])
+                logger.debug("Added generic tower filters")
         if "cooling_tower" in man_made_terms:
             fillters.extend(["53"])
+            logger.debug("Added cooling tower filters")
         if any(term in man_made_terms for term in antennas):
             fillters.extend(["29", "43", "antenna", "33", "28", "satellite"])
+            logger.debug("Added antenna/satellite filters")
         if "communications_tower" in man_made_terms:
             fillters.extend(["radio tower", "telecom tower"])
+            logger.debug("Added communications tower filters")
 
+    # Power infrastructure
     if Selected_GeoFeature["power"]:
         power_terms = split_string(Selected_GeoFeature["power"])
+        logger.debug(f"Processing power terms: {power_terms}")
         power = ["compensator", "plant", "substation", "busbar"]
         electric_tower = ["tower", "terminal", "connection"]
         if any(term in power_terms for term in power):
             fillters.extend(["23", "converter", "32", "processor","Generator", "Forge"])
+            logger.debug("Added power plant filters")
         if any(term in power_terms for term in electric_tower):
             fillters.extend(["20"])
+            logger.debug("Added electric tower filters")
         if "converter" in power_terms:
             fillters.extend(["converter"])
+            logger.debug("Added converter filters")
         if "transformer" in power_terms:
             fillters.extend(["transformer"])
+            logger.debug("Added transformer filters")
         if "heliostat" in power_terms:
             fillters.extend(["Solar Mirrors"])
+            logger.debug("Added solar mirror filters")
 
+    # Industrial facilities
     if (Selected_GeoFeature["man_made"] and any(term in split_string(Selected_GeoFeature["man_made"]) for term in ["pump", "pumping_station", "works"])) or \
        (Selected_GeoFeature["building"] and "industrial" in split_string(Selected_GeoFeature["building"])):
         fillters.extend(["32", "53", "60", "56", "23", "6"])
+        logger.debug("Added industrial facility filters")
 
+    # Pipelines
     if Selected_GeoFeature["man_made"] and "pipeline" in split_string(Selected_GeoFeature["man_made"]):
         fillters.extend(["piping"])
+        logger.debug("Added pipeline filters")
 
+    # Storage tanks
     if (Selected_GeoFeature["building"] and any(term in split_string(Selected_GeoFeature["building"]) for term in ["gasometer", "storage_tank", "fuel", "tank"])) or \
        (Selected_GeoFeature["man_made"] and any(term in split_string(Selected_GeoFeature["man_made"]) for term in ["gasometer", "storage_tank", "fuel", "tank"])):
         fillters.extend(["48", "fuel", "gas"])
+        logger.debug("Added storage tank filters")
 
+    # Silos
     if (Selected_GeoFeature["building"] and "silo" in split_string(Selected_GeoFeature["building"])) or \
        (Selected_GeoFeature["man_made"] and "silo" in split_string(Selected_GeoFeature["man_made"])):
         fillters.extend(["silo"])
+        logger.debug("Added silo filters")
 
+    # Water towers
     if (Selected_GeoFeature["building"] and "water_tower" in split_string(Selected_GeoFeature["building"])) or \
        (Selected_GeoFeature["man_made"] and "water_tower" in split_string(Selected_GeoFeature["man_made"])):
         fillters.extend(["37"])
+        logger.debug("Added water tower filters")
 
+    # Bridges
     if (Selected_GeoFeature["building"] and any(term in split_string(Selected_GeoFeature["building"]) for term in ["bridge", "bridges"])) or \
        (Selected_GeoFeature["man_made"] and any(term in split_string(Selected_GeoFeature["man_made"]) for term in ["bridge", "bridges"])) or \
        Selected_GeoFeature["bridge"]:
         fillters.extend(["16"])
+        logger.debug("Added bridge filters")
 
+    # Hospitals
     if (Selected_GeoFeature["building"] and "hospital" in split_string(Selected_GeoFeature["building"])) or \
        (Selected_GeoFeature["amenity"] and "hospital" in split_string(Selected_GeoFeature["amenity"])):
         fillters.extend(["62"])
+        logger.debug("Added hospital filters")
 
+    # Military bunkers
     if (Selected_GeoFeature["military"] and "bunker" in split_string(Selected_GeoFeature["military"])) or \
        (Selected_GeoFeature["building"] and "bunker" in split_string(Selected_GeoFeature["building"])):
         fillters.extend(["4", "bunker"])
+        logger.debug("Added bunker filters")
 
+    # Military barracks
     barracks = ["barrack", "barracks"]
     if (Selected_GeoFeature["building"] and any(term in split_string(Selected_GeoFeature["building"]) for term in barracks)) or \
        (Selected_GeoFeature["military"] and any(term in split_string(Selected_GeoFeature["military"]) for term in barracks)):
         fillters.extend(["12", "35", "10"])
+        logger.debug("Added barrack filters")
 
+    # Military ammunition
     if Selected_GeoFeature["military"] and any(term in split_string(Selected_GeoFeature["military"]) for term in ["ammo", "ammunition", "munition"]):
         fillters.extend(["ammo", "ammunition", "munition", "bunker"])
+        logger.debug("Added ammunition filters")
 
+    # Execute the database query with collected filters
     filters_str = ", ".join(fillters)
+    logger.debug(f"Final filter string: '{filters_str}'")
+    
     if filters_str != "":
-        Accurate_filltered_BMSmodels = Load_Db(Db_path, filters_str)
-        return Accurate_filltered_BMSmodels
+        try:
+            Accurate_filltered_BMSmodels = Load_Db(Db_path, filters_str)
+            if not Accurate_filltered_BMSmodels.empty:
+                logger.info(f"Auto_Selected found {len(Accurate_filltered_BMSmodels)} matching BMS models using {len(fillters)} filters")
+                return Accurate_filltered_BMSmodels
+            else:
+                logger.warning(f"Auto_Selected: No BMS models found matching filters: {filters_str}")
+                return None
+        except Exception as e:
+            logger.error(f"Auto_Selected: Error querying database with filters '{filters_str}': {str(e)}")
+            return None
     else:
+        logger.info("Auto_Selected: No applicable filters found for the given GeoFeature")
         return None
 
 def split_string(s):

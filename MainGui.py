@@ -100,7 +100,7 @@ class MainPage(tk.Tk):
             frame.grid(row=0, column=0, sticky="nsew")
 
         # Set Name and Icon and version
-        self.shared_data["BuildingGeneratorVer"].set("Building Generator v1.4")
+        self.shared_data["BuildingGeneratorVer"].set("Building Generator v1.5")
         self.title(self.shared_data["BuildingGeneratorVer"].get())
         self.iconbitmap("Assets/icon_128.ico")
 
@@ -168,16 +168,27 @@ class MainPage(tk.Tk):
         logger.info(f"Log directory: {logs_dir}")
 
     def SelectCTfile(self, event):
+        """Open a file dialog to select a CT XML file and update the application state.
+        
+        This method handles CT file selection, updates the database path, and refreshes
+        the database display based on the selected CT file.
+        """
+        logging.debug("CT file selection dialog opened")
+        
         # open a file dialog and update the label text with the selected file path
         file_path = tkinter.filedialog.askopenfilename(
             filetypes=[("Class-Table files", "*.xml")]
         )
+        
         if file_path:
+            logging.info(f"CT file selected: {file_path}")
             # Will place in CTfile the right path
             if file_path == "":
                 self.shared_data["CTpath"].set("No CT file selected")
+                logging.warning("Empty CT file path selected")
             else:
                 self.shared_data["CTpath"].set(file_path)
+                logging.debug(f"CT path updated in shared_data: {file_path}")
 
             self.Get_Version_Theater_From_path(file_path)
             ImagePath = self.frames["DatabasePage"].Check_Availability_Database()
@@ -189,19 +200,25 @@ class MainPage(tk.Tk):
             ].canvas.create_image(
                 989.0, 412.0, image=self.frames["DatabasePage"].image_available
             )
+            
             # Get Database and present it in table
             DB_path = self.shared_data["BMS_Database_Path"].get()
             if DB_path and self.shared_data["Database_Availability"].get() == "1":
+                logging.info(f"Loading database from: {DB_path}")
                 array = Load_Db(DB_path, "All")
                 self.shared_data["BMS_Databse"] = array
                 self.frames["DatabasePage"].UdpateDB_Tables()
+                logging.debug("Database loaded and tables updated successfully")
 
             # If Database is not present, erase last data related to the old DB
             else:
+                logging.warning("Database not available, clearing existing data")
                 self.shared_data["BMS_Databse"] = np.array([])
 
                 for row in self.frames["DatabasePage"].ModelsTable.get_children():
                     self.frames["DatabasePage"].ModelsTable.delete(row)
+        else:
+            logging.debug("CT file selection cancelled by user")
 
     def SettingWindow(self):
         """Open the enhanced settings window with tabbed interface.
@@ -465,8 +482,33 @@ class MainPage(tk.Tk):
             self.shared_data["projection_string"].set(loaded_data.get("projection_string", ""))
             self.shared_data['backup_bms_files'] = loaded_data.get('backup_bms_files', '0') # Default to '0' (False)
             self.shared_data['backup_features_files'] = loaded_data.get('backup_features_files', '0') # Default to '0' (False)
-            self.shared_data["log_level"].set(loaded_data.get("log_level", "INFO"))
-            self.shared_data["logging_method"].set(loaded_data.get("logging_method", "Console"))
+            
+            # Load and apply logging configuration
+            log_level = loaded_data.get("log_level", "None")
+            logging_method = loaded_data.get("logging_method", "Console")
+            
+            self.shared_data["log_level"].set(log_level)
+            self.shared_data["logging_method"].set(logging_method)
+            
+            # Convert logging_method to handlers list and apply
+            handlers = []
+            if logging_method == "Console":
+                handlers = ['console']
+            elif logging_method == "File":
+                handlers = ['file']
+            elif logging_method == "Both":
+                handlers = ['console', 'file']
+            elif logging_method == "None":
+                handlers = []
+            else:
+                handlers = ['console']  # Default fallback
+            
+            # Apply the logging configuration
+            if handlers:  # Only apply if we have handlers
+                self.update_logging_config(level=log_level, handlers=handlers)
+                logging.info(f"Applied loaded logging configuration: level={log_level}, method={logging_method}")
+            else:
+                logging.info("Logging disabled by loaded configuration")
             
             # Set dropdown and segmented button values
             self.frames["OperationPage"].Fillter_optionmenu.set(loaded_data.get("Fillter_optionmenu", ""))
@@ -552,6 +594,7 @@ class MainPage(tk.Tk):
             
             # Will try to load Database through CT path that been inserted through the config file
             if loaded_data["CT_path"]:
+                logging.debug("Loading database from config CT path")
                 ImagePath = self.frames["DatabasePage"].Check_Availability_Database()
 
                 # Update Un/Availability picture of Database which loaded through CT XML file
@@ -565,12 +608,15 @@ class MainPage(tk.Tk):
                 DB_path = self.shared_data["BMS_Database_Path"].get()
 
                 if DB_path and self.shared_data["Database_Availability"].get() == "1":
+                    logging.info(f"Loading database from: {DB_path}")
                     array = Load_Db(DB_path, "All")
                     self.shared_data["BMS_Databse"] = array
                     self.frames["DatabasePage"].UdpateDB_Tables()
+                    logging.debug("Database loaded and tables updated successfully")
 
                 # If Database is not present, erase last data related to the old DB
                 else:
+                    logging.warning("Database not available, clearing data")
                     self.shared_data["BMS_Databse"] = np.array([])
                     self.shared_data["CTpath"].set("No CT file selected")
                     for row in self.frames["DatabasePage"].ModelsTable.get_children():
@@ -591,7 +637,8 @@ class MainPage(tk.Tk):
     def startup_definition(self):
         """Check if startup configuration exists in the config file, and apply it if it does
         
-        This method only loads the config if the config file exists and has 'Startup' set to '1'
+        This method loads logging configuration from config file and applies it,
+        then loads full config if auto-start is enabled.
         """
         try:
             # Use json_path_handler to read from data_components folder
@@ -611,30 +658,66 @@ class MainPage(tk.Tk):
             # Update Auto_Load to match the Startup value from config
             self.Auto_Load.set(startup_value == "1")
             
-            # Only load config if Startup is '1'
+            # Apply logging configuration from config file regardless of auto-start setting
+            log_level = config_data.get("log_level", "None")
+            logging_method = config_data.get("logging_method", "Console")
+            
+            # Update shared data with logging settings
+            self.shared_data["log_level"].set(log_level)
+            self.shared_data["logging_method"].set(logging_method)
+            
+            # Convert logging_method to handlers list for update_logging_config
+            handlers = []
+            if logging_method == "Console":
+                handlers = ['console']
+            elif logging_method == "File":
+                handlers = ['file']
+            elif logging_method == "Both":
+                handlers = ['console', 'file']
+            elif logging_method == "None":
+                handlers = []
+            else:
+                handlers = ['console']  # Default fallback
+            
+            # Apply the logging configuration
+            if handlers:  # Only apply if we have handlers
+                self.update_logging_config(level=log_level, handlers=handlers)
+                logging.info(f"Applied logging configuration from config: level={log_level}, method={logging_method}")
+            else:
+                logging.info("Logging disabled by configuration")
+            
+            # Only load full config if Startup is '1'
             if startup_value == "1":
-                logging.info("Auto-start is enabled. Loading configuration...")
+                logging.info("Auto-start is enabled. Loading full configuration...")
                 self.load_config(show_message=False)
             else:
-                logging.info("Auto-start is disabled. Not loading configuration at startup.")
+                logging.info("Auto-start is disabled. Applied logging settings only.")
                 
         except Exception as e:
             # Log the error but don't show a message box as this happens at startup
             logging.error(f"Error loading startup configuration: {str(e)}")
 
     def Get_Version_Theater_From_path(self, file_path):
-        """The Fucntion gets a path of CT XML file and analyze the version
-        BMS version and Theater are found and sent to the shared data variable.
-        if not found "N/A" is mentioned
-        file_path:   CT XML
-        output:      none"""
+        """Parse the CT XML file path to extract BMS version and theater information.
+        
+        The function analyzes the path structure to determine the BMS version and theater.
+        If not found, "N/A" is set for the respective values.
+        
+        Args:
+            file_path (str): Path to the CT XML file
+        """
+        logging.debug(f"Parsing version and theater from path: {file_path}")
+        
         # Split path into components
         components = file_path.split("/")
         try:
             # find index of rightmost string of "Data"
             idx = components.index("Data")
             # Get the BMS version string before "Data"
-            self.shared_data["BMS_version"].set(components[idx - 1])
+            bms_version = components[idx - 1]
+            self.shared_data["BMS_version"].set(bms_version)
+            logging.info(f"BMS version detected: {bms_version}")
+            
             # if component before "Data" starts with "Add-on" or "Add-On" its theater
             if components[idx + 1].lower().startswith("add-on"):
                 temp = components[idx + 1].lower().replace("add-on ", "")
@@ -642,14 +725,19 @@ class MainPage(tk.Tk):
                     temp[0].upper() + temp[1 : len(temp)]
                 )  # Assign upper later to the first letter
                 self.shared_data["Theater"].set(theater)
+                logging.info(f"Theater detected from add-on: {theater}")
             else:
                 # if version is not detected, place Korea as the default theater
                 self.shared_data["Theater"].set("korea")
+                logging.info("Theater set to default: korea")
 
-        except:
+        except Exception as e:
+            logging.warning(f"Error parsing version/theater from path: {str(e)}")
             # if version is not detected, find a theater with "add-on" (korea cannot be located)
             theater = "N/A"
             self.shared_data["BMS_version"].set("N/A")
+            logging.debug("BMS version set to N/A due to parsing error")
+            
             # Iterate over the components from right to left
             for i in range(len(components) - 1, -1, -1):
                 # If the component starts with "Add-On", update the Theater string and break the loop
@@ -660,6 +748,7 @@ class MainPage(tk.Tk):
                         temp[0].upper() + temp[1 : len(temp)]
                     )  # Assign upper later to the first letter
                     self.shared_data["Theater"].set(theater)
+                    logging.info(f"Theater detected from fallback search: {theater}")
                     break
             # if theater is not detected then N/A
             self.shared_data["Theater"].set(theater)
@@ -2752,9 +2841,25 @@ class GeoDataPage(tk.Frame):
         try:
             file_path = self.controller.shared_data["Geopath"].get()
             logger.info(f"Using GeoJSON file: {file_path}")
-        except ValueError:
-            logger.error("GeoJson path is invalid")
-            return messagebox.showerror("Error", "GeoJson path is invalid")
+            
+            # Validate file path is not empty or default text
+            if not file_path or file_path in ["No GeoJSON file selected", ""]:
+                logger.error("No GeoJSON file selected")
+                return messagebox.showerror("Error", "Please select a GeoJSON file first")
+            
+            # Check if file actually exists
+            import os
+            if not os.path.exists(file_path):
+                logger.error(f"GeoJSON file not found: {file_path}")
+                return messagebox.showerror("Error", f"GeoJSON file not found:\n{file_path}\n\nPlease select a valid file.")
+            
+            # Check if file has correct extension
+            if not file_path.lower().endswith(('.geojson', '.json')):
+                logger.warning(f"File does not have .geojson extension: {file_path}")
+                
+        except Exception as e:
+            logger.error(f"Error getting GeoJSON path: {str(e)}")
+            return messagebox.showerror("Error", f"Error accessing GeoJSON path: {str(e)}")
 
         # Import the processing window functionality
         from processing_window import run_with_processing
@@ -2866,7 +2971,8 @@ class GeoDataPage(tk.Frame):
                     data_list[8] = round(
                         float(heights[0, i]), 3
                     )  # Replace initial height from the raw Geofile to the calculated height
-                except:
+                except (ValueError, TypeError, IndexError) as e:
+                    logging.debug(f"Could not convert height data for row {i}: {str(e)}")
                     data_list[9] = ""  # Use empty string instead of 0
                     
                 self.GeoTable.insert("", "end", values=data_list)
@@ -3009,11 +3115,12 @@ class GeoDataPage(tk.Frame):
                     # Split the line into key and value
                     try:
                         key, value = line.strip().split("=", 1)
-                    except:
+                    except ValueError:
                         try:
                             key, value = line.strip().split("=")
-                        except:
-                            return messagebox.showerror("Error", "File cannot be read")
+                        except ValueError as e:
+                            logging.error(f"Unable to parse line '{line.strip()}' in projection file: {str(e)}")
+                            return messagebox.showerror("Error", "File cannot be read - invalid format")
 
                     # Add the key-value pair to the dictionary
                     string[key] = value

@@ -1,0 +1,39 @@
+# Building Generator v1.5 - Requirements
+# Core Python packages required for the Building Generator application
+
+# GUI Framework
+tkinter>=8.6.0
+customtkinter>=5.2.0
+
+# Data Processing and Analysis
+numpy>=1.21.0
+pandas>=1.3.0
+geopandas>=0.9.0
+
+# Geospatial Libraries
+shapely>=1.8.0
+rtree>=0.9.0
+pyproj>=3.0.0
+
+# Visualization
+matplotlib>=3.5.0
+pillow>=8.3.0
+
+# XML Processing
+lxml>=4.6.0
+
+# File and Path Management
+pathlib2>=2.3.0; python_version < "3.4"
+
+# Utilities
+typing-extensions>=4.0.0; python_version < "3.8"
+
+# Optional: Performance and additional features
+# scipy>=1.7.0  # For advanced mathematical operations
+# plotly>=5.0.0  # For interactive plots (future enhancement)
+# requests>=2.25.0  # For web-based data sources (future enhancement)
+
+# Development and Testing (optional)
+# pytest>=6.0.0
+# pytest-cov>=2.10.0
+# sphinx>=4.0.0 

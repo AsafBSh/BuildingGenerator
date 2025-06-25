@@ -6,6 +6,9 @@ import math as m
 import logging
 import traceback
 
+# Set up logging - use standard pattern to inherit from main application
+logger = logging.getLogger(__name__)
+
 
 def get_field_value(row, field_names, special=None):
     """
@@ -43,7 +46,8 @@ def get_field_value(row, field_names, special=None):
                         return value, False
                 # If the value is not None and not nan, return it
                 return value
-        except:
+        except Exception as e:
+            logger.debug(f"Error accessing field '{field}': {str(e)}")
             pass
 
     if special is not None:
@@ -68,9 +72,11 @@ def get_height_value(value):
                     none_height = True
                 else:
                     none_height = False
-            except:
+            except Exception as e:
+                logger.debug(f"Error converting height value to float: {str(e)}")
                 none_height = True
-    except:
+    except Exception as e:
+        logger.debug(f"Error processing height value: {str(e)}")
         none_height = True
     return none_height
 
@@ -81,11 +87,15 @@ def projection(coordinations, string):
             string: string of the projection
     oputput: list of list of the projected to BMS x,y"""
 
+    logger.debug(f"Starting coordinate projection with {len(coordinations)} coordinates using projection: {string}")
+    
     # Define the source and target projections
     transformer = Transformer.from_crs("4326", string, always_xy=True)
 
     # Transform the point from WGS84 to the target projection
     projected_coordinations = []
+    skipped_count = 0
+    
     for coord in coordinations:
         try:
             # Ensure coordinates are float values
@@ -94,31 +104,55 @@ def projection(coordinations, string):
             projected_coordinations.append([x_bms, y_bms])
         except (ValueError, TypeError) as e:
             # Skip invalid coordinates and log them
-            logging.warning(f"Skipping invalid coordinate {coord}: {str(e)}")
+            logger.warning(f"Skipping invalid coordinate {coord}: {str(e)}")
+            skipped_count += 1
             continue
+    
+    # Log projection results summary
+    if skipped_count > 0:
+        logger.warning(f"Projection completed: {len(projected_coordinations)} successful, {skipped_count} skipped")
+    else:
+        logger.debug(f"Projection completed successfully for all {len(projected_coordinations)} coordinates")
+        
     return projected_coordinations
 
 
 def Load_Geo_File(
     json_path, projection_string=None, floor_height=2.286
 ):
-    # Create a logger for this function
-    logger = logging.getLogger(__name__)
-
-    # Create formatter for consistent log messages
-    formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
+    # Log function start with parameters
+    logger.info(f"Starting GeoJSON processing with parameters:")
+    logger.info(f"  - GeoJSON path: {json_path}")
+    logger.info(f"  - Projection string: {'Provided' if projection_string else 'None'}")
+    logger.info(f"  - Floor height: {floor_height} meters")
     
     # meter2feet_google = 3.2808399
     meter2feet_BMS = 3.27998
 
+    # Validate input parameters
+    if not json_path:
+        raise ValueError("GeoJSON file path cannot be empty")
+    
+    # Check if file exists
+    import os
+    if not os.path.exists(json_path):
+        raise FileNotFoundError(f"GeoJSON file not found: {json_path}")
+    
+    # Check if file is readable
+    if not os.access(json_path, os.R_OK):
+        logger.critical(f"Cannot read GeoJSON file: {json_path}")
+    
     # Load the GeoJSON file
     geojson_file = json_path
     logger.info(f"Loading GeoJSON from: {json_path}")
-    gdf = gpd.read_file(geojson_file)
-    logger.info(f"GeoJSON loaded with {len(gdf)} features")
+    
+    try:
+        gdf = gpd.read_file(geojson_file)
+        logger.info(f"GeoJSON loaded with {len(gdf)} features")
+    except Exception as e:
+        error_msg = f"Failed to read GeoJSON file '{json_path}': {str(e)}"
+        logger.error(error_msg)
+        raise ValueError(error_msg)
     logger.debug("Fetching GeoData details for each feature")
 
     # Create a list to store the extracted information for each feature and center list of each feature

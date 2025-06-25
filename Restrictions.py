@@ -1,6 +1,10 @@
 import tkinter as tk
 import customtkinter as Ctk
 from functools import partial
+import json
+import os
+from tkinter import messagebox, simpledialog
+from utils.json_path_handler import JsonFiles, load_or_create_restrictions_profiles, save_json
 
 
 class RestrictionsWindow(tk.Toplevel):
@@ -27,6 +31,9 @@ class RestrictionsWindow(tk.Toplevel):
         # Disable restriction button while window is open
         self.restriction_button.configure(state="disabled")
 
+        # Profile management variables
+        self.current_profile = ""  # Default to empty profile
+        
         # Create a dictionary to map checkbox names to numbers
         self.checkbox_dict = {
             "Carter": "1",
@@ -100,7 +107,7 @@ class RestrictionsWindow(tk.Toplevel):
         }
 
         # Create a dictionary to store the checkboxes
-        checkboxes = {}
+        self.checkboxes = {}
 
         # Create main frame with padding
         main_frame = Ctk.CTkFrame(self, fg_color="#E7F3F7", corner_radius=10)
@@ -178,9 +185,71 @@ class RestrictionsWindow(tk.Toplevel):
             text_color="#1A1A1A",
             border_color="#8DBBE7",
             border_width=1,
-            height=350
+            height=300
         )
-        self.feature_textbox.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        self.feature_textbox.pack(fill="both", expand=True, padx=10, pady=(0, 5))
+
+        # Profile management frame - placed at the bottom of the textbox
+        profile_frame = Ctk.CTkFrame(right_panel, fg_color="#B8D4E3", corner_radius=6)
+        profile_frame.pack(fill="x", padx=10, pady=(0, 10))
+
+        # Configure grid for profile frame
+        profile_frame.grid_columnconfigure(1, weight=1)  # Make dropdown expand
+
+        # First row: Profile label and dropdown
+        profile_label = Ctk.CTkLabel(
+            profile_frame,
+            text="Profile:",
+            font=("Helvetica", 11, "bold"),
+            text_color="#1A1A1A"
+        )
+        profile_label.grid(row=0, column=0, padx=(8, 4), pady=(5, 2), sticky="w")
+
+        # Profile dropdown - spans and expands
+        self.profile_dropdown = Ctk.CTkOptionMenu(
+            profile_frame,
+            values=[""],
+            command=self.on_profile_selected,
+            fg_color="#FFFFFF",
+            button_color="#8DBBE7",
+            text_color="#1A1A1A",
+            height=24
+        )
+        self.profile_dropdown.grid(row=0, column=1, columnspan=2, padx=(4, 8), pady=(5, 2), sticky="ew")
+
+        # Second row: Profile buttons
+        self.save_button = Ctk.CTkButton(
+            profile_frame,
+            text="Save",
+            command=self.save_profile,
+            fg_color="#8DBBE7",
+            hover_color="#7BAAD6",
+            width=50,
+            height=22
+        )
+        self.save_button.grid(row=1, column=0, padx=(8, 2), pady=(2, 5), sticky="ew")
+
+        self.save_new_button = Ctk.CTkButton(
+            profile_frame,
+            text="Save New",
+            command=self.save_new_profile,
+            fg_color="#8DBBE7",
+            hover_color="#7BAAD6",
+            width=60,
+            height=22
+        )
+        self.save_new_button.grid(row=1, column=1, padx=2, pady=(2, 5), sticky="ew")
+
+        self.delete_button = Ctk.CTkButton(
+            profile_frame,
+            text="Delete",
+            command=self.delete_profile,
+            fg_color="#8DBBE7",
+            hover_color="#7BAAD6",
+            width=50,
+            height=22
+        )
+        self.delete_button.grid(row=1, column=2, padx=(2, 8), pady=(2, 5), sticky="ew")
 
         # Get existing text from restriction_box
         restriction_text = self.restriction_box.get("0.0", "end")
@@ -198,12 +267,12 @@ class RestrictionsWindow(tk.Toplevel):
         restriction_list = [item.strip() for item in restriction_text.split(",")]
 
         # Create a list to store the numbers of the checked checkboxes
-        checked_checkboxes = [item for item in restriction_list if item.isdigit()]
+        self.checked_checkboxes = [item for item in restriction_list if item.isdigit()]
 
         # Create checkboxes with a cleaner layout
         for i, checkbox_name in enumerate(self.checkbox_dict.keys()):
             var = tk.IntVar()
-            if self.checkbox_dict[checkbox_name] in checked_checkboxes:
+            if self.checkbox_dict[checkbox_name] in self.checked_checkboxes:
                 var.set(1)
             checkbox = Ctk.CTkCheckBox(
                 checkbox_frame,
@@ -222,14 +291,17 @@ class RestrictionsWindow(tk.Toplevel):
                 command=partial(
                     self.update_checked_checkboxes,
                     self.checkbox_dict,
-                    checked_checkboxes,
+                    self.checked_checkboxes,
                     var,
                     checkbox_name,
                 )
             )
             checkbox.grid(row=i % 17, column=i // 17, sticky="w", pady=2, padx=5)
             # Store the checkbox and the associated variable in the dictionary
-            checkboxes[checkbox_name] = (checkbox, var)
+            self.checkboxes[checkbox_name] = (checkbox, var)
+
+        # Load profiles and update dropdown
+        self.load_profiles()
 
         # Button frame for footer buttons
         button_frame = Ctk.CTkFrame(main_frame, fg_color="#E7F3F7")
@@ -241,9 +313,9 @@ class RestrictionsWindow(tk.Toplevel):
             text="Refresh",
             command=partial(
                 self.import_restriction_text,
-                checked_checkboxes,
+                self.checked_checkboxes,
                 self.checkbox_dict,
-                checkboxes,
+                self.checkboxes,
             ),
             fg_color="#8DBBE7",
             hover_color="#7BAAD6",
@@ -255,7 +327,7 @@ class RestrictionsWindow(tk.Toplevel):
         button_Export = Ctk.CTkButton(
             button_frame,
             text="Save & Close",
-            command=lambda: self.save_and_close(checked_checkboxes),
+            command=lambda: self.save_and_close(self.checked_checkboxes),
             fg_color="#8DBBE7",
             hover_color="#7BAAD6",
             corner_radius=6,
@@ -270,6 +342,232 @@ class RestrictionsWindow(tk.Toplevel):
         self.bind("<Destroy>", self.enable_restriction_button)
 
         self.mainloop()
+
+    def load_profiles(self):
+        """Load profiles from the restrictions_profiles.json file and update dropdown"""
+        try:
+            # Use json_path_handler to load profiles
+            profiles_data = load_or_create_restrictions_profiles()
+            
+            # Get profile names, with empty string first
+            profile_names = [""] + [name for name in profiles_data.keys() if name != ""]
+                
+            # Update dropdown with profile names
+            self.profile_dropdown.configure(values=profile_names)
+            self.profile_dropdown.set("")
+        except Exception as e:
+            print(f"Error loading profiles: {e}")
+            self.profile_dropdown.configure(values=[""])
+            self.profile_dropdown.set("")
+
+    def on_profile_selected(self, profile_name):
+        """Handle profile selection from dropdown"""
+        self.current_profile = profile_name
+        
+        if profile_name == "":
+            # Clear everything for empty profile
+            self.clear_all_selections()
+            return
+            
+        try:
+            # Load the selected profile
+            profiles_data = load_or_create_restrictions_profiles()
+                    
+            if profile_name in profiles_data:
+                profile_data = profiles_data[profile_name]
+                
+                # Clear current selections
+                self.clear_all_selections()
+                
+                # Load checkboxes
+                if "checkboxes" in profile_data:
+                    self.checked_checkboxes.extend(profile_data["checkboxes"])
+                    # Update checkbox states
+                    for checkbox_name, (checkbox, var) in self.checkboxes.items():
+                        if self.checkbox_dict[checkbox_name] in profile_data["checkboxes"]:
+                            var.set(1)
+                
+                # Load textbox content
+                if "textbox" in profile_data:
+                    self.feature_textbox.insert("0.0", profile_data["textbox"])
+                         
+        except Exception as e:
+            print(f"Error loading profile {profile_name}: {e}")
+            messagebox.showerror("Error", f"Failed to load profile: {e}")
+
+    def clear_all_selections(self):
+        """Clear all checkboxes and textbox"""
+        # Clear checked checkboxes list
+        self.checked_checkboxes.clear()
+        
+        # Clear all checkbox states
+        for checkbox_name, (checkbox, var) in self.checkboxes.items():
+            var.set(0)
+            
+        # Clear textbox
+        self.feature_textbox.delete("0.0", tk.END)
+
+    def save_profile(self):
+        """Save current configuration to the currently selected profile"""
+        if self.current_profile == "":
+            # Skip saving to empty profile without popup
+            return
+            
+        # Show confirmation dialog
+        dialog = messagebox.askyesno(
+            "Confirm Save", 
+            f"Are you sure you want to override the profile '{self.current_profile}'?\nThis action cannot be undone.",
+            parent=self
+        )
+        
+        if not dialog:
+            return
+            
+        try:
+            # Load existing profiles
+            profiles_data = load_or_create_restrictions_profiles()
+            
+            # Get current textbox content
+            textbox_content = self.feature_textbox.get("0.0", "end").strip()
+            
+            # Save current configuration
+            profiles_data[self.current_profile] = {
+                "checkboxes": self.checked_checkboxes.copy(),
+                "textbox": textbox_content
+            }
+            
+            # Save using json_path_handler
+            save_json(JsonFiles.RESTRICTIONS_PROFILES, profiles_data)
+                
+            messagebox.showinfo("Success", f"Profile '{self.current_profile}' saved successfully!", parent=self)
+            
+        except Exception as e:
+            print(f"Error saving profile: {e}")
+            messagebox.showerror("Error", f"Failed to save profile: {e}", parent=self)
+
+    def save_new_profile(self):
+        """Create a new profile with current configuration"""
+        # Ask for new profile name
+        dialog = tk.Toplevel(self)
+        dialog.title("New Profile Name")
+        dialog.geometry("300x150")
+        dialog.transient(self)
+        dialog.grab_set()
+        dialog.lift()
+        dialog.focus_force()
+        
+        # Center the dialog
+        dialog.update_idletasks()
+        x = self.winfo_x() + (self.winfo_width() // 2) - (dialog.winfo_width() // 2)
+        y = self.winfo_y() + (self.winfo_height() // 2) - (dialog.winfo_height() // 2)
+        dialog.geometry(f"+{x}+{y}")
+        
+        profile_name = tk.StringVar()
+        
+        tk.Label(dialog, text="Enter a name for the new profile:").pack(pady=10)
+        entry = tk.Entry(dialog, textvariable=profile_name, width=30)
+        entry.pack(pady=5)
+        entry.focus_set()
+        
+        def on_ok():
+            dialog.result = profile_name.get()
+            dialog.destroy()
+            
+        def on_cancel():
+            dialog.result = None
+            dialog.destroy()
+        
+        button_frame = tk.Frame(dialog)
+        button_frame.pack(pady=10)
+        
+        tk.Button(button_frame, text="OK", command=on_ok).pack(side="left", padx=5)
+        tk.Button(button_frame, text="Cancel", command=on_cancel).pack(side="left", padx=5)
+        
+        # Bind Enter key to OK
+        entry.bind("<Return>", lambda e: on_ok())
+        
+        # Wait for dialog to close
+        self.wait_window(dialog)
+        
+        if not hasattr(dialog, 'result') or not dialog.result:
+            return
+            
+        profile_name = dialog.result.strip()
+        
+        if not profile_name:
+            messagebox.showwarning("Invalid Name", "Profile name cannot be empty!", parent=self)
+            return
+            
+        try:
+            # Load existing profiles
+            profiles_data = load_or_create_restrictions_profiles()
+            
+            # Check if profile name already exists
+            if profile_name in profiles_data:
+                messagebox.showwarning("Duplicate Name", f"Profile '{profile_name}' already exists!", parent=self)
+                return
+                
+            # Get current textbox content
+            textbox_content = self.feature_textbox.get("0.0", "end").strip()
+            
+            # Save current configuration to new profile
+            profiles_data[profile_name] = {
+                "checkboxes": self.checked_checkboxes.copy(),
+                "textbox": textbox_content
+            }
+            
+            # Save using json_path_handler
+            save_json(JsonFiles.RESTRICTIONS_PROFILES, profiles_data)
+                
+            # Update dropdown and select new profile
+            self.load_profiles()
+            self.profile_dropdown.set(profile_name)
+            self.current_profile = profile_name
+            
+            messagebox.showinfo("Success", f"Profile '{profile_name}' created successfully!", parent=self)
+            
+        except Exception as e:
+            print(f"Error creating new profile: {e}")
+            messagebox.showerror("Error", f"Failed to create new profile: {e}", parent=self)
+
+    def delete_profile(self):
+        """Delete the currently selected profile"""
+        if self.current_profile == "":
+            # Skip deleting empty profile without popup
+            return
+            
+        # Show confirmation dialog
+        result = messagebox.askyesno(
+            "Confirm Delete", 
+            f"Are you sure you want to delete the profile '{self.current_profile}'?\nThis action cannot be undone.",
+            parent=self
+        )
+        
+        if not result:
+            return
+            
+        try:
+            # Load existing profiles
+            profiles_data = load_or_create_restrictions_profiles()
+                
+            # Remove the profile
+            if self.current_profile in profiles_data:
+                del profiles_data[self.current_profile]
+                
+                # Save updated profiles using json_path_handler
+                save_json(JsonFiles.RESTRICTIONS_PROFILES, profiles_data)
+                    
+                # Update dropdown and reset to Empty
+                self.load_profiles()
+                self.profile_dropdown.set("")
+                self.current_profile = ""
+                self.clear_all_selections()
+                
+                messagebox.showinfo("Success", f"Profile deleted successfully!", parent=self)
+                
+        except Exception as e:
+            print(f"Error deleting profile: {e}")
+            messagebox.showerror("Error", f"Failed to delete profile: {e}", parent=self)
 
     def import_restriction_text(self, checked_checkboxes, checkbox_dict, checkboxes):
         """Refresh the UI based on the current restriction box content"""

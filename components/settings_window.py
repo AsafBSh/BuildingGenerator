@@ -18,7 +18,7 @@ from components import objective_cache
 from components.ct_data_handler import CTDataHandler
 
 # Version information for documentation
-__version__ = '1.2.0'
+__version__ = '1.5.0'
 __author__ = 'BMS Building Generator Team'
 __doc__ = '''
 Enhanced Settings Window for the Building Generator Application
@@ -77,34 +77,20 @@ class SettingsWindow(tk.Toplevel):
         self.geojson_path = geojson_path
         self.editor_extraction_path = editor_extraction_path
         
-        # Initialize logger
-        self.logger = logging.getLogger(__name__) # __name__ will be 'components.settings_window'
-        self.logger.setLevel(logging.INFO)     # Ensure this logger processes INFO messages
-
-        # Explicitly configure a console handler for this logger to ensure visibility for debugging
-        # Check if a similar stream handler already exists for this specific logger
-        has_dedicated_console_handler = False
-        for handler in self.logger.handlers:
-            if isinstance(handler, logging.StreamHandler) and \
-               (handler.stream is sys.stdout or handler.stream is sys.stderr):
-                # If one exists, ensure its level is appropriate
-                handler.setLevel(logging.INFO) 
-                has_dedicated_console_handler = True
-                break
+        # Add debugging information about the BMS path
+        logging.debug(f"SettingsWindow initialized with BMS path: '{self.bms_path}'")
+        logging.debug(f"BMS path type: {type(self.bms_path)}")
+        if self.bms_path:
+            logging.debug(f"BMS path exists: {os.path.exists(self.bms_path)}")
+            logging.debug(f"BMS path is file: {os.path.isfile(self.bms_path)}")
+            logging.debug(f"BMS path is dir: {os.path.isdir(self.bms_path)}")
+            if os.path.isfile(self.bms_path):
+                logging.debug(f"BMS path directory: '{os.path.dirname(self.bms_path)}'")
+        else:
+            logging.warning("BMS path is None or empty during initialization")
         
-        if not has_dedicated_console_handler:
-            ch = logging.StreamHandler(sys.stdout) # Output to standard out
-            ch.setLevel(logging.INFO)
-            # Use a distinct formatter to clearly identify messages from this logger
-            formatter = logging.Formatter(f'%(asctime)s - %(name)s [{self.__class__.__name__}] - %(levelname)s - %(message)s')
-            ch.setFormatter(formatter)
-            self.logger.addHandler(ch)
-            self.logger.debug(f"Dedicated console handler added to {self.logger.name}.")
-        
-        # Stop messages from this logger from propagating to the root logger's handlers
-        # This prevents duplicate messages if root is also configured for console output
-        # and helps isolate this logger's output for debugging.
-        self.logger.propagate = False
+        # Initialize logger reference (use parent's logging system)
+        self.logger = logging.getLogger(__name__)
         
         # Create the UI
         self._init_ui()
@@ -120,6 +106,8 @@ class SettingsWindow(tk.Toplevel):
         # Set up protocol handler for when the window is closed
         self.protocol("WM_DELETE_WINDOW", self._on_close)
     
+
+
     def _init_ui(self):
         """Initialize the user interface components."""
         # Configure the window background
@@ -357,9 +345,9 @@ class SettingsWindow(tk.Toplevel):
                 backup_bms_default = (val.get() == '1')
             elif isinstance(val, str):
                 backup_bms_default = (val == '1')
-            self.log_info(f"Loaded backup BMS setting: {backup_bms_default} from shared_data type: {type(val).__name__}")
+            logging.info(f"Loaded backup BMS setting: {backup_bms_default} from shared_data type: {type(val).__name__}")
         else:
-            self.log_info(f"No 'backup_bms_files' in shared_data, using default: {backup_bms_default}")
+            logging.info(f"No 'backup_bms_files' in shared_data, using default: {backup_bms_default}")
 
         self.backup_bms_var = tk.BooleanVar(value=backup_bms_default)
 
@@ -369,7 +357,7 @@ class SettingsWindow(tk.Toplevel):
             if not isinstance(self.parent.shared_data.get('backup_bms_files'), tk.StringVar) or \
             self.parent.shared_data['backup_bms_files'].get() != current_bms_shared_value_str:
                 self.parent.shared_data['backup_bms_files'] = tk.StringVar(value=current_bms_shared_value_str)
-                self.log_info(f"Initialized/Updated 'backup_bms_files' in shared_data as StringVar with value: {current_bms_shared_value_str}")
+                logging.info(f"Initialized/Updated 'backup_bms_files' in shared_data as StringVar with value: {current_bms_shared_value_str}")
         
         self.backup_bms_checkbox = Ctk.CTkCheckBox(
             checkbox_row2, # This parent frame should be defined earlier in the method
@@ -396,9 +384,9 @@ class SettingsWindow(tk.Toplevel):
                 backup_features_default = (val.get() == '1')
             elif isinstance(val, str):
                 backup_features_default = (val == '1')
-            self.log_info(f"Loaded backup features setting: {backup_features_default} from shared_data type: {type(val).__name__}")
+            logging.info(f"Loaded backup features setting: {backup_features_default} from shared_data type: {type(val).__name__}")
         else:
-            self.log_info(f"No 'backup_features_files' in shared_data, using default: {backup_features_default}")
+            logging.info(f"No 'backup_features_files' in shared_data, using default: {backup_features_default}")
 
         self.backup_features_var = tk.BooleanVar(value=backup_features_default)
 
@@ -408,7 +396,7 @@ class SettingsWindow(tk.Toplevel):
             if not isinstance(self.parent.shared_data.get('backup_features_files'), tk.StringVar) or \
                self.parent.shared_data['backup_features_files'].get() != current_features_shared_value_str:
                 self.parent.shared_data['backup_features_files'] = tk.StringVar(value=current_features_shared_value_str)
-                self.log_info(f"Initialized/Updated 'backup_features_files' in shared_data as StringVar with value: {current_features_shared_value_str}")
+                logging.info(f"Initialized/Updated 'backup_features_files' in shared_data as StringVar with value: {current_features_shared_value_str}")
         
         self.backup_features_checkbox = Ctk.CTkCheckBox(
             checkbox_row2,
@@ -812,7 +800,7 @@ class SettingsWindow(tk.Toplevel):
                     # Add to objective_types with the ID-Name format
                     type_name = self._get_type_name(int(obj_id))
                     objective_types[obj_id] = f"{obj_id}: {type_name}"
-                self.log_info(f"Loaded {len(objective_types)} objective types from templates")
+                logging.info(f"Loaded {len(objective_types)} objective types from templates")
             
             # If no types found in templates, try objective cache
             if not objective_types:
@@ -820,7 +808,7 @@ class SettingsWindow(tk.Toplevel):
                 if cache_types:
                     for obj_id, type_name in cache_types.items():
                         objective_types[str(obj_id)] = f"{obj_id}: {type_name}"
-                    self.log_info(f"Loaded {len(objective_types)} objective types from cache")
+                    logging.info(f"Loaded {len(objective_types)} objective types from cache")
             
             # If still no types found, use default fallback list
             if not objective_types:
@@ -834,10 +822,10 @@ class SettingsWindow(tk.Toplevel):
                     "31": "31: SAM Site"
                 }
                 objective_types = fallback_types
-                self.log_info("Using fallback objective types list")
+                logging.info("Using fallback objective types list")
         
         except Exception as e:
-            self.log_error("Error loading objective types", e)
+            logging.error(f"Error loading objective types: {str(e)}")
             # Provide minimal fallback if everything fails
             objective_types = {"1": "1: Airbase"}
         
@@ -846,9 +834,8 @@ class SettingsWindow(tk.Toplevel):
     def _load_objective_fields(self, selection):
         """Load the fields for the selected objective type.
         
-        This method implements lazy loading of objective properties to improve performance
-        with large datasets. It uses a cached approach for displaying properties and
-        categorizes them into logical groups for better organization.
+        This method loads objective properties from objective_templates.json and creates
+        consistent field entries that match the bms_injection_window.py implementation.
         
         Args:
             selection (str): The selected objective type in format 'ID: Name'
@@ -865,31 +852,25 @@ class SettingsWindow(tk.Toplevel):
             # Extract just the ID number from the selection string
             type_id = selection.split(":")[0].strip()
         except Exception as e:
-            self.log_error(f"Error parsing objective type: {selection}", e)
+            logging.error(f"Error parsing objective type: {selection} - {str(e)}")
             return
         
-        # Load the template for this type
+        # Load the template for this type - same approach as bms_injection_window.py
         try:
+            # ONLY load directly from the JSON file - no fallback to cache or injector
             templates = load_json(JsonFiles.OBJECTIVE_TEMPLATES, default={})
+            template = {}
             
-            # Check if type exists in templates
-            if type_id not in templates:
-                # Create empty section with message
-                message_label = Ctk.CTkLabel(
-                    self.obj_fields_frame,
-                    text=f"No template found for objective type {type_id}. Using default template (not saved).",
-                    font=("Arial", 12),
-                    text_color="#2E2E3A",
-                    fg_color="transparent"
-                )
-                message_label.pack(padx=10, pady=20)
-                
-                # Create default template in memory only (don't save to file yet)
-                # This prevents overriding existing templates in the file
-                templates[type_id] = self._create_default_template()
-                self.log_info(f"Created temporary default template for objective type {type_id} (not saved to file)")
+            # Get template for this type from JSON file only
+            if templates and str(type_id) in templates:
+                template = templates[str(type_id)]
+                logging.info(f"Template source: objective_templates.json file")
+            else:
+                # If not found in file, use empty template - validation should prevent this
+                logging.info(f"Type {type_id} not found in objective_templates.json")
+                template = {}
             
-            # Create fields for each property
+            # Create fields for each property - same approach as bms_injection_window.py
             self.field_vars = {}  # Store StringVars for each field
             
             # Create a container frame without scrolling (uses main window scrolling)
@@ -912,8 +893,32 @@ class SettingsWindow(tk.Toplevel):
             )
             props_title.pack(fill=tk.X, padx=5, pady=5)
             
-            # Sort properties for consistent display
-            sorted_props = sorted(templates[type_id].items())
+            # Common fields that all objectives have - same as bms_injection_window.py
+            common_fields = [
+                ("DataRate", "0"),
+                ("DeaggDistance", "0"),
+                ("Det_NoMove", "0.0"),
+                ("Det_Foot", "0.0"),
+                ("Det_Wheeled", "0.0"),
+                ("Det_Tracked", "0.0"),
+                ("Det_LowAir", "0.0"),
+                ("Det_Air", "0.0"),
+                ("Det_Naval", "0.0"),
+                ("Det_Rail", "0.0"),
+                ("Dam_None", "0"),
+                ("Dam_Penetration", "0"),
+                ("Dam_HighExplosive", "0"),
+                ("Dam_Heave", "0"),
+                ("Dam_Incendairy", "0"),
+                ("Dam_Proximity", "0"),
+                ("Dam_Kinetic", "0"),
+                ("Dam_Hydrostatic", "0"),
+                ("Dam_Chemical", "0"),
+                ("Dam_Nuclear", "0"),
+                ("Dam_Other", "0"),
+                ("ObjectiveIcon", "0"),
+                ("RadarFeature", "0")
+            ]
             
             # Group detection properties
             detection_frame = Ctk.CTkFrame(fields_container, fg_color="#E0E8F0")
@@ -957,16 +962,19 @@ class SettingsWindow(tk.Toplevel):
             )
             other_label.pack(fill=tk.X, padx=5, pady=5)
             
-            # Assign properties to appropriate group
-            for prop_name, prop_value in sorted_props:
-                # Create StringVar and store for later retrieval
-                var = tk.StringVar(value=prop_value)
-                self.field_vars[prop_name] = var
+            # Create field entries for each field with proper grouping
+            for field_name, default_value in common_fields:
+                # Get value from template or use default
+                field_value = template.get(field_name, default_value)
                 
-                # Create property row
-                if prop_name.startswith("Det_"):
+                # Create StringVar and store for later retrieval
+                var = tk.StringVar(value=field_value)
+                self.field_vars[field_name] = var
+                
+                # Create property row - group by field name prefix
+                if field_name.startswith("Det_"):
                     target_frame = detection_frame
-                elif prop_name.startswith("Dam_"):
+                elif field_name.startswith("Dam_"):
                     target_frame = damage_frame
                 else:
                     target_frame = other_frame
@@ -978,7 +986,7 @@ class SettingsWindow(tk.Toplevel):
                 # Property label
                 prop_label = Ctk.CTkLabel(
                     row_frame,
-                    text=prop_name + ":",
+                    text=field_name + ":",
                     width=150,
                     anchor="w",
                     text_color="#2E2E3A",
@@ -999,10 +1007,12 @@ class SettingsWindow(tk.Toplevel):
                 )
                 prop_entry.pack(side=tk.LEFT, padx=5, pady=5, fill=tk.X, expand=True)
             
-            self.log_info(f"Loaded {len(self.field_vars)} properties for objective type {type_id}")
+            # Performance metric
+            elapsed_time = time.time() - loading_start_time
+            logging.info(f"Loaded {len(self.field_vars)} properties for objective type {type_id} in {elapsed_time:.2f} seconds")
             
         except Exception as e:
-            self.log_error(f"Error loading objective fields for type {type_id}", e)
+            logging.error(f"Error loading objective fields for type {type_id}: {str(e)}")
             # Create error message
             error_label = Ctk.CTkLabel(
                 self.obj_fields_frame,
@@ -1119,123 +1129,372 @@ class SettingsWindow(tk.Toplevel):
             
         # Log performance metrics
         elapsed_time = time.time() - start_time
-        self.log_info(f"Updated BMS content for {selection} in {elapsed_time:.4f} seconds")
+        logging.info(f"Updated BMS content for {selection} in {elapsed_time:.4f} seconds")
             
     def _save_objective_template(self):
         """Save the current objective template configuration.
         
-        This method saves the currently selected objective type template to the
-        objective_templates.json file. It only updates the specific type selected,
-        preserving all other data in the file.
+        This method saves field values to objective_templates.json using the same
+        approach as bms_injection_window.py for consistency.
         """
         try:
-            # Start performance tracking
-            start_time = time.time()
-            
             # Get the type ID from the selection string
             selection = self.objective_type_var.get()
             type_id = selection.split(":")[0].strip()
             
-            # Load existing templates - important to preserve all other objective types
-            templates = load_json(JsonFiles.OBJECTIVE_TEMPLATES, default={})
-            
-            # Batch processing - collect all field values before writing
-            new_template = {}
+            # Get field values - stored as strings to make saving/loading simpler
+            fields = {}
             for field_name, string_var in self.field_vars.items():
-                new_template[field_name] = string_var.get()
+                raw_value = string_var.get().strip()
+                fields[field_name] = raw_value
             
-            # Ensure Value field is included (recent enhancement to bms_injector.py)
-            if "Value" not in new_template:
-                new_template["Value"] = "0"
-            
-            # Create confirmation message - using triple quotes to avoid syntax issues
-            confirm_message = f"""Save template for objective type {type_id}?
-This will update ONLY this specific objective type."""
-            
-            # Show a confirmation dialog before saving
-            if messagebox.askyesno("Confirm Save", confirm_message):
-                # Update only this specific template
-                templates[type_id] = new_template
+            # Show confirmation dialog before saving
+            if messagebox.askyesno("Confirm Save", f"Save template for objective type {type_id}?\nThis will update the template in objective_templates.json"):
+                # Load existing templates to preserve other types
+                objective_templates = load_json(JsonFiles.OBJECTIVE_TEMPLATES, default={})
                 
-                # Save templates to file
-                save_json(JsonFiles.OBJECTIVE_TEMPLATES, templates)
+                # Create or update the template for the current type
+                type_key_str = str(type_id)  # Ensure it's a string for JSON keys
                 
-                # Log performance metrics for optimization
-                elapsed_time = time.time() - start_time
-                self.log_info(f"Saved template for objective type {type_id} in {elapsed_time:.2f} seconds")
+                if type_key_str not in objective_templates:
+                    objective_templates[type_key_str] = {}
+                    
+                # Update the fields in the template - same approach as bms_injection_window.py
+                objective_templates[type_key_str].update(fields)
                 
-                # Show confirmation - this is appropriate for an explicit save action
-                self.log_info(f"Template for objective type {type_id} saved successfully", show_popup=True)
+                # Save updated templates
+                success = save_json(JsonFiles.OBJECTIVE_TEMPLATES, objective_templates)
+                if success:
+                    logging.info(f"Successfully saved field values to objective_templates.json for type {type_id}")
+                    messagebox.showinfo("Template Saved", f"Template for objective type {type_id} saved successfully.")
+                else:
+                    logging.error(f"Failed to save field values to objective_templates.json")
+                    messagebox.showerror("Error", "Failed to save template.")
             
         except Exception as e:
-            # Show error message since this is an explicit user action
-            self.log_error("Error saving objective template", e, show_popup=True)
+            logging.error(f"Error saving objective template: {str(e)}")
+            messagebox.showerror("Error", f"Failed to save template: {str(e)}")
     
     def _reset_objective_fields(self):
-        """Reset objective fields to default values."""
-        try:
-            # Get current selection
-            selection = self.objective_type_var.get()
-            
-            # Extract the type key from selection (format is 'ID: Name')
-            type_key = None
-            if selection and ':' in selection:
-                try:
-                    type_key = int(selection.split(':', 1)[0].strip())
-                except ValueError:
-                    self.log_error(f"Invalid type key in selection: {selection}")
-            
-            if not type_key:
-                self.log_error("No objective type selected")
-                messagebox.showerror("Error", "Please select an objective type first")
-                return
-            
-            # Confirm with user
-            if messagebox.askyesno("Confirm Reset", "Are you sure you want to reset all fields to default values?"):
-                # Get default template from objective cache
-                template = objective_cache.get_objective_templates(type_key)
-                
-                # If template not in cache, try to load from BMS data
-                if not template or not template.items():
-                    try:
-                        from bms_injector import BmsInjector
-                        
-                        # Create a BMS injector object if not already available
-                        injector = BmsInjector(self.bms_path)
-                        
-                        # Get template from BMS injector
-                        template = injector.objective_templates.get(str(type_key), {})
-                        self.log_info(f"Using template from BMS data with {len(template)} fields")
-                    except Exception as template_err:
-                        self.log_error(f"Failed to load template from BMS data: {str(template_err)}", template_err)
-                        template = {}
-                else:
-                    self.log_info(f"Using template from cache with {len(template)} fields")
-                
-                # If we still don't have a template, create minimal defaults
-                if not template or not template.items():
-                    template = {
-                        "DataRate": "0",
-                        "DeaggDistance": "0",
-                        "Value": "0"  # Ensure Value field is included
-                    }
-                    self.log_info("Using minimal default template")
-                
-                # Update all fields with template values
-                field_count = 0
-                for field_name, string_var in self.field_vars.items():
-                    if field_name in template:
-                        string_var.set(template[field_name])
-                    else:
-                        string_var.set("0")  # Default for unknown fields
-                    field_count += 1
-                
-                self.log_info(f"Reset {field_count} fields to dynamic template values")
-                messagebox.showinfo("Fields Reset", "All fields have been reset to default values.")
+        """
+        Calculate median values for fields based on existing objectives of the same type.
+        Uses the same sophisticated OCD analysis as bms_injection_window.py.
+        Only updates the GUI fields, does not save data to any file.
+        """
+        import xml.etree.ElementTree as ET
+        from pathlib import Path
+        import os
+        import traceback
+        from tkinter import messagebox
         
+        # 1. Initialization - Get the selected type and validate BMS path
+        selection = self.objective_type_var.get()
+        if not selection or ':' not in selection:
+            messagebox.showerror("Error", "Please select an objective type first")
+            return False
+            
+        try:
+            type_key = int(selection.split(':', 1)[0].strip())
+        except ValueError:
+            logging.error(f"Invalid type key in selection: {selection}")
+            messagebox.showerror("Error", "Invalid objective type selected")
+            return False
+            
+        type_name = self._get_type_name(type_key)
+        logging.info(f"RESETTING VALUES FOR OBJECTIVE TYPE: {type_key} ({type_name})")
+        
+        # Use the BMS path that's already loaded in the settings window  
+        logging.debug(f"Starting objective reset for type {type_key} ({type_name})")
+        logging.debug(f"self.bms_path = '{self.bms_path}'")
+        logging.debug(f"type(self.bms_path) = {type(self.bms_path)}")
+        
+        if not self.bms_path:
+            logging.critical("BMS path is None or empty")
+            messagebox.showerror("Error", "BMS path is not set. Please check the BMS path in General tab.")
+            return False
+            
+        # Handle case where bms_path might be a file instead of directory
+        if os.path.isfile(self.bms_path):
+            logging.warning(f"BMS path '{self.bms_path}' is a file, extracting directory")
+            bms_path = os.path.dirname(self.bms_path)
+        else:
+            bms_path = self.bms_path
+            
+        logging.debug(f"Using BMS directory: '{bms_path}'")
+        
+        if not os.path.isdir(bms_path):
+            logging.critical(f"BMS directory does not exist: '{bms_path}'")
+            messagebox.showerror("Error", f"Invalid BMS installation directory: {bms_path}\nPlease check the BMS path in General tab.")
+            return False
+            
+        logging.info(f"Using BMS path: {bms_path}")
+        
+        # Define field names to collect values for
+        median_fields = [
+            "DataRate", "DeaggDistance", "Det_NoMove", "Det_Foot", "Det_Wheeled",
+            "Det_Tracked", "Det_LowAir", "Det_Air", "Det_Naval", "Det_Rail",
+            "Dam_None", "Dam_Penetration", "Dam_HighExplosive", "Dam_Heave", "Dam_Incendairy",
+            "Dam_Proximity", "Dam_Kinetic", "Dam_Hydrostatic", "Dam_Chemical", "Dam_Nuclear",
+            "Dam_Other", "ObjectiveIcon"
+        ]
+        
+        # Dictionary to store values by field
+        field_values = {field: [] for field in median_fields}
+        
+        # Find the CT file with case-insensitive search
+        logging.debug(f"Searching for CT file in directory: '{bms_path}'")
+        ct_path = None
+        for ct_filename in ["Falcon4_CT.xml", "Falcon4_CT.XML"]:
+            potential_path = os.path.join(bms_path, ct_filename)
+            logging.debug(f"Checking for CT file: '{potential_path}'")
+            if os.path.exists(potential_path):
+                ct_path = potential_path
+                logging.info(f"Found CT file: '{ct_path}'")
+                break
+            else:
+                logging.debug(f"CT file not found: '{potential_path}'")
+        
+        if not ct_path:
+            logging.error(f"CT file not found in '{bms_path}' (tried both .xml and .XML)")
+            messagebox.showerror("Error", f"CT file not found in {bms_path}\nTried: Falcon4_CT.xml and Falcon4_CT.XML")
+            return False
+        
+        try:
+            # 2. CT File Processing - Load and parse the CT file
+            logging.info(f"Loading CT file: {ct_path}")
+            tree = ET.parse(ct_path)
+            root = tree.getroot()
+            
+            # Verify we have CT entries with the target type
+            matching_ct_entries = []
+            for ct_elem in root.findall('.//CT'):
+                type_elem = ct_elem.find("Type")
+                if type_elem is not None and type_elem.text and type_elem.text.strip().isdigit():
+                    ct_type = int(type_elem.text.strip())
+                    if ct_type == type_key:
+                        ct_num = ct_elem.get("Num")
+                        matching_ct_entries.append(ct_num)
+            
+            # 3. OCD Directory Scanning
+            obj_dir = os.path.join(bms_path, "ObjectiveRelatedData")
+            if not os.path.exists(obj_dir) or not os.path.isdir(obj_dir):
+                logging.error(f"ObjectiveRelatedData directory not found at {obj_dir}")
+                messagebox.showerror("Error", f"ObjectiveRelatedData directory not found at {obj_dir}")
+                return False
+                
+            # Verify CT file structure
+            ct_entries = root.findall('.//CT')
+            if not ct_entries:
+                # Try alternative format if standard format not found
+                ct_entries = root.findall('./CT/Entry')
+            
+            # Get all OCD directories
+            ocd_dirs = [d for d in os.listdir(obj_dir) if os.path.isdir(os.path.join(obj_dir, d)) and d.startswith("OCD_")]
+            logging.info(f"Found {len(ocd_dirs)} OCD directories")
+            
+            # Counter for found OCD files of our type
+            ocd_count = 0
+            processed_count = 0
+            
+            # Process each OCD directory
+            for ocd_dir_name in ocd_dirs:
+                processed_count += 1
+                if processed_count % 100 == 0:
+                    logging.info(f"Progress: Processed {processed_count}/{len(ocd_dirs)} directories...")
+                    
+                # Find the OCD XML file in this directory
+                ocd_dir_path = os.path.join(obj_dir, ocd_dir_name)
+                ocd_file = None
+                
+                for filename in os.listdir(ocd_dir_path):
+                    if filename.startswith("OCD_") and filename.upper().endswith(".XML"):
+                        ocd_file = os.path.join(ocd_dir_path, filename)
+                        break
+                
+                if not ocd_file:
+                    continue  # No OCD XML file found in this directory
+                
+                try:
+                    # Parse the OCD file
+                    ocd_tree = ET.parse(ocd_file)
+                    ocd_root = ocd_tree.getroot()
+                    ocd_element = ocd_root.find("OCD")
+                    
+                    if ocd_element is None:
+                        continue  # No OCD element in this file
+                        
+                    # Get the CT Index from this OCD file
+                    ct_idx_elem = ocd_element.find("CtIdx")
+                    if ct_idx_elem is None or not ct_idx_elem.text:
+                        continue  # No CT Index in this file
+                        
+                    # Try different formats of CT index to handle potential mismatches
+                    ct_idx_raw = ct_idx_elem.text.strip()
+                    
+                    # Create a list of possible CT index formats to try
+                    ct_idx_variants = [
+                        ct_idx_raw,                  # Original format
+                        ct_idx_raw.lstrip('0'),      # Remove leading zeros
+                        f"{int(ct_idx_raw)}" if ct_idx_raw.isdigit() else ct_idx_raw  # Convert to int and back to string
+                    ]
+                    
+                    # Check if any of the CT index variants has the matching type
+                    matching_type = False
+                    
+                    for ct_idx in ct_idx_variants:
+                        # Try to find the CT entry with this index variant
+                        ct_elem = root.find(f".//CT[@Num='{ct_idx}']")
+                        
+                        # If not found by @Num attribute, try finding by Index element
+                        if ct_elem is None:
+                            # Search for CT entries with matching Index element
+                            for entry in root.findall("./CT/Entry"):
+                                idx_elem = entry.find("Index")
+                                if idx_elem is not None and idx_elem.text and idx_elem.text.strip() == ct_idx:
+                                    # Found by Index element, now check the parent CT element
+                                    ct_elem = entry.getparent() if hasattr(entry, 'getparent') else None
+                                    break
+                        
+                        if ct_elem is not None:
+                            # Found the CT, check its type
+                            type_elem = ct_elem.find("Type")
+                            if type_elem is not None and type_elem.text:
+                                try:
+                                    entry_type = int(type_elem.text.strip())
+                                    # Compare with our target type
+                                    if entry_type == type_key:
+                                        matching_type = True
+                                        break
+                                except ValueError:
+                                    pass  # Skip if type can't be converted to int
+                    
+                    # Skip if this objective doesn't have the type we're looking for
+                    if not matching_type:
+                        continue
+                        
+                    # Found an OCD file with matching type - collect field values
+                    ocd_count += 1
+                    
+                    # Extract values for all our fields of interest
+                    for field in median_fields:
+                        field_elem = ocd_element.find(field)
+                        if field_elem is not None and field_elem.text:
+                            try:
+                                # Convert to the appropriate type (float or int)
+                                field_text = field_elem.text.strip()
+                                if "." in field_elem.text:
+                                    value = float(field_text)
+                                else:
+                                    value = int(field_text)
+                                field_values[field].append(value)
+                            except (ValueError, TypeError) as e:
+                                # Keep as string if conversion fails
+                                field_values[field].append(field_elem.text)
+                
+                except Exception as e:
+                    # Log the error but continue processing other files
+                    logging.error(f"Error processing OCD file {ocd_file}: {str(e)}")
+            
+            # Process complete
+            
+            # 4. Field Value Calculation - Calculate median values for each field
+            calculated_values = {}
+            
+            for field in median_fields:
+                values = field_values[field]
+                
+                if values and len(values) > 0:
+                    # We found values for this field in OCD files
+                    if all(isinstance(v, (int, float)) for v in values):
+                        # For numeric values, calculate the median
+                        sorted_values = sorted(values)
+                        n = len(sorted_values)
+                        
+                        if n % 2 == 0:
+                            # Even number of values - average the middle two
+                            mid_right = n // 2
+                            mid_left = mid_right - 1
+                            median = (sorted_values[mid_left] + sorted_values[mid_right]) / 2
+                        else:
+                            # Odd number of values - take the middle one
+                            median = sorted_values[n // 2]
+                        
+                        # Keep integers as integers
+                        if all(isinstance(v, int) for v in values):
+                            median = int(median)
+                        
+                        calculated_values[field] = str(median)
+                    else:
+                        # For non-numeric values, use the most common value
+                        value_counts = {}
+                        for v in values:
+                            if v is not None:
+                                value_counts[v] = value_counts.get(v, 0) + 1
+                        
+                        if value_counts:
+                            most_common = max(value_counts.items(), key=lambda x: x[1])[0]
+                            calculated_values[field] = str(most_common)
+                        else:
+                            # If we can't determine the most common, keep current value
+                            if field in self.field_vars:
+                                current_value = self.field_vars[field].get()
+                                calculated_values[field] = current_value
+                            else:
+                                calculated_values[field] = "0"
+                else:
+                    # No values found for this field in any OCD files
+                    if field in self.field_vars:
+                        current_value = self.field_vars[field].get()
+                        calculated_values[field] = current_value
+                    else:
+                        calculated_values[field] = "0"
+            
+            # 5. UI Update - Update the GUI entries with calculated values
+            updated_fields = set()
+            field_count = 0
+            
+            # Make sure we have the field variables before trying to update them
+            if not hasattr(self, 'field_vars') or not self.field_vars:
+                messagebox.showerror("Error", "No field variables available for update")
+                return False
+                
+            for field_name, string_var in self.field_vars.items():
+                if field_name in calculated_values and field_name not in updated_fields:
+                    value = calculated_values[field_name]
+                    # Update the StringVar
+                    string_var.set(str(value))
+                    
+                    # Count updated fields and mark as updated
+                    field_count += 1
+                    updated_fields.add(field_name)
+            
+            # Reset complete
+            
+            # Show success/failure message
+            if ocd_count == 0:
+                # No matching OCD files found
+                messagebox.showwarning(
+                    "No Matching Objectives Found",
+                    f"No objectives of type {type_key} ({type_name}) were found.\n"
+                    f"Field values have been kept as is."
+                )
+                return False
+            else:
+                # Successfully updated fields
+                messagebox.showinfo(
+                    "Reset Complete",
+                    f"Successfully calculated median values from {ocd_count} existing objectives.\n"
+                    f"Updated {field_count} fields with median values."
+                )
+                return True
+                
         except Exception as e:
-            self.log_error("Error resetting objective fields", e)
-            messagebox.showerror("Error", f"Failed to reset fields: {str(e)}")
+            # Log and display any errors
+            error_msg = f"Error resetting fields to defaults: {e}"
+            logging.error(f"ERROR: {error_msg}")
+            traceback.print_exc()
+            messagebox.showerror("Error", error_msg)
+            return False
     
     def _toggle_backup_bms(self):
         """Toggle backup BMS files setting.
@@ -1258,14 +1517,13 @@ This will update ONLY this specific objective type."""
                 
                 # Update in a thread-safe manner and log clearly
                 status = "enabled" if self.backup_bms_var.get() else "disabled"
-                # Log with root logger for better visibility in main log output
-                logging.getLogger('root').info(f"BMS file backup {status}")
-                self.log_info(f"BMS file backup {status}")
+                # Use the unified logging approach that respects user preferences
+                logging.info(f"BMS file backup {status}")
                 
                 # Make the logging more prominent for debugging
-                self.log_info(f"======= BMS BACKUP SETTING CHANGED: {status} =======")
+                logging.info(f"======= BMS BACKUP SETTING CHANGED: {status} =======")
         except Exception as e:
-            self.log_error("Error toggling BMS backup setting", e)
+            logging.error(f"Error toggling BMS backup setting: {str(e)}")
     
     def _toggle_backup_features(self):
         """Toggle backup generated features setting.
@@ -1286,11 +1544,11 @@ This will update ONLY this specific objective type."""
                 else:
                     self.parent.shared_data['backup_features_files'] = tk.StringVar(value=backup_value)
                 
-                # Update in a thread-safe manner
-                status = "enabled" if self.backup_features_var.get() else "disabled"
-                self.log_info(f"Critical features backup {status}")
+                            # Update in a thread-safe manner
+            status = "enabled" if self.backup_features_var.get() else "disabled"
+            logging.info(f"Critical features backup {status}")
         except Exception as e:
-            self.log_error("Error toggling features backup setting", e)
+            logging.error(f"Error toggling features backup setting: {str(e)}")
     
     def _init_objective_interface(self):
         """Initialize the interface for objective data."""
@@ -1392,6 +1650,9 @@ This will update ONLY this specific objective type."""
     def _load_ct_fields(self, selection):
         """Load the fields for the selected Class Table type.
         
+        This method loads CT field data directly from ct_templates.json using the same
+        approach as the objective data fields for consistency.
+        
         Args:
             selection (str): The selected class table type in format 'ID: Name'
         """
@@ -1407,14 +1668,23 @@ This will update ONLY this specific objective type."""
             # Extract just the ID number from the selection string
             type_id = selection.split(":")[0].strip()
         except Exception as e:
-            self.log_error(f"Error parsing class table type: {selection}", e)
+            logging.error(f"Error parsing class table type: {selection} - {str(e)}")
             messagebox.showerror("Error", f"Failed to parse class table type: {str(e)}")
             return
         
-        # Load the template for this type
+        # Load the template for this type directly from ct_templates.json
         try:
-            # Get template from CT data handler
-            template = CTDataHandler.get_ct_template(type_id)
+            # Load templates using json_path_handler - same approach as objective fields
+            from utils.json_path_handler import load_json, JsonFiles
+            ct_templates = load_json(JsonFiles.CT_TEMPLATES, default={})
+            
+            # Get template for this specific type
+            if type_id in ct_templates:
+                template = ct_templates[type_id]
+            else:
+                # Create default template if not found
+                template = self._create_default_ct_template(type_id)
+                logging.info(f"Using default template for CT type {type_id}")
             
             # Create fields for each property
             self.ct_field_vars = {}  # Store StringVars for each field
@@ -1439,61 +1709,93 @@ This will update ONLY this specific objective type."""
             )
             props_title.pack(fill=tk.X, padx=5, pady=5)
             
-            # Sort properties for consistent display
-            sorted_props = sorted(template.items())
-            
-            # Create categories frame
+            # Create categories frame similar to objective interface
             categories_frame = Ctk.CTkFrame(fields_container, fg_color="#E0E8F0")
             categories_frame.pack(fill=tk.X, padx=5, pady=5)
             
-            # Create a single property frame for all fields
-            property_frame = Ctk.CTkFrame(categories_frame, fg_color="#E0E8F0")
-            property_frame.pack(fill=tk.X, padx=5, pady=5)
+            # Define field categories similar to objective interface
+            field_categories = {
+                "Core Properties": [
+                    "Id", "CollisionType", "CollisionRadius", "UpdateRate", "UpdateTolerance",
+                    "FineUpdateRange", "FineUpdateForceRange", "FineUpdateMultiplier"
+                ],
+                "Damage Properties": [
+                    "DamageSeed", "HitPoints"
+                ],
+                "Version Properties": [
+                    "MajorRev", "MinRev"
+                ],
+                "Management Properties": [
+                    "CreatePriority", "ManagementDomain", "Transferable", "Private", 
+                    "Tangible", "Collidable", "Global", "Persistent"
+                ],
+                "Graphics Properties": [
+                    "GraphicsNormal", "GraphicsRepaired", "GraphicsDamaged", "GraphicsDestroyed",
+                    "GraphicsLeftDestroyed", "GraphicsRightDestroyed", "GraphicsBothDestroyed"
+                ],
+                "Classification Properties": [
+                    "Domain", "Class", "SubType", "Specific", "Owner", "Class_6", "Class_7",
+                    "MoverDefinitionData", "EntityType"
+                ]
+            }
             
-            # Assign properties to the frame, skipping Type category
-            for prop_name, prop_value in sorted_props:
-                # Skip the Type category as required
-                if prop_name == "Type":
-                    continue
-                    
-                # Create StringVar and store for later retrieval
-                var = tk.StringVar(value=prop_value)
-                self.ct_field_vars[prop_name] = var
+            # Create fields for each category
+            for category, field_names in field_categories.items():
+                # Create category frame
+                category_frame = Ctk.CTkFrame(categories_frame, fg_color="#E8F0F7")
+                category_frame.pack(fill=tk.X, padx=5, pady=5)
                 
-                # Create row frame
-                row_frame = Ctk.CTkFrame(property_frame, fg_color="#E0E8F0")
-                row_frame.pack(fill=tk.X, padx=5, pady=2)
-                
-                # Property label
-                prop_label = Ctk.CTkLabel(
-                    row_frame,
-                    text=prop_name + ":",
-                    width=150,
-                    anchor="w",
+                # Category title
+                category_title = Ctk.CTkLabel(
+                    category_frame,
+                    text=category,
+                    font=("Arial", 11, "bold"),
                     text_color="#2E2E3A",
-                    font=("Arial", 11)
+                    fg_color="transparent"
                 )
-                prop_label.pack(side=tk.LEFT, padx=5, pady=3)
+                category_title.pack(anchor="w", padx=10, pady=(5, 0))
                 
-                # Property entry
-                prop_entry = Ctk.CTkEntry(
-                    row_frame,
-                    textvariable=var,
-                    width=180,  # Increased width for better visibility
-                    fg_color="#FFFFFF",
-                    text_color="#000000",
-                    border_width=1,
-                    border_color="#B3C8DD",
-                    font=("Arial", 11)
-                )
-                prop_entry.pack(side=tk.LEFT, padx=5, pady=5, fill=tk.X, expand=True)
+                # Create fields for this category
+                for field_name in field_names:
+                    if field_name in template:
+                        # Create StringVar and store for later retrieval
+                        var = tk.StringVar(value=str(template[field_name]))
+                        self.ct_field_vars[field_name] = var
+                        
+                        # Create row frame
+                        row_frame = Ctk.CTkFrame(category_frame, fg_color="#E8F0F7")
+                        row_frame.pack(fill=tk.X, padx=10, pady=2)
+                        
+                        # Property label
+                        prop_label = Ctk.CTkLabel(
+                            row_frame,
+                            text=field_name + ":",
+                            width=150,
+                            anchor="w",
+                            text_color="#2E2E3A",
+                            font=("Arial", 11)
+                        )
+                        prop_label.pack(side=tk.LEFT, padx=5, pady=3)
+                        
+                        # Property entry
+                        prop_entry = Ctk.CTkEntry(
+                            row_frame,
+                            textvariable=var,
+                            width=180,
+                            fg_color="#FFFFFF",
+                            text_color="#000000",
+                            border_width=1,
+                            border_color="#B3C8DD",
+                            font=("Arial", 11)
+                        )
+                        prop_entry.pack(side=tk.LEFT, padx=5, pady=5, fill=tk.X, expand=True)
             
             # Performance metric
             elapsed_time = time.time() - loading_start_time
-            self.log_info(f"Loaded {len(self.ct_field_vars)} properties for class table type {type_id} in {elapsed_time:.2f} seconds")
+            logging.info(f"Loaded {len(self.ct_field_vars)} properties for class table type {type_id} in {elapsed_time:.2f} seconds")
             
         except Exception as e:
-            self.log_error(f"Error loading class table fields for type {type_id}", e)
+            logging.error(f"Error loading class table fields for type {type_id}: {str(e)}")
             # Create error message
             error_label = Ctk.CTkLabel(
                 self.ct_fields_frame,
@@ -1503,77 +1805,324 @@ This will update ONLY this specific objective type."""
                 fg_color="transparent"
             )
             error_label.pack(padx=10, pady=20)
+    
+    def _create_default_ct_template(self, type_id):
+        """Create a default CT template for a given type ID.
+        
+        Args:
+            type_id (str): The CT type ID
+            
+        Returns:
+            dict: Default CT template
+        """
+        return {
+            "Id": "0",
+            "CollisionType": "0",
+            "CollisionRadius": "0.0",
+            "Domain": "0",
+            "Class": "0",
+            "SubType": "0",
+            "Specific": "0",
+            "Owner": "0",
+            "Class_6": "0",
+            "Class_7": "0",
+            "UpdateRate": "0",
+            "UpdateTolerance": "0",
+            "FineUpdateRange": "0.0",
+            "FineUpdateForceRange": "0.0",
+            "FineUpdateMultiplier": "0.0",
+            "DamageSeed": "0",
+            "HitPoints": "0",
+            "MajorRev": "0",
+            "MinRev": "0",
+            "CreatePriority": "0",
+            "ManagementDomain": "0",
+            "Transferable": "0",
+            "Private": "0",
+            "Tangible": "0",
+            "Collidable": "0",
+            "Global": "0",
+            "Persistent": "0",
+            "GraphicsNormal": "0",
+            "GraphicsRepaired": "0",
+            "GraphicsDamaged": "0",
+            "GraphicsDestroyed": "0",
+            "GraphicsLeftDestroyed": "0",
+            "GraphicsRightDestroyed": "0",
+            "GraphicsBothDestroyed": "0",
+            "MoverDefinitionData": "0",
+            "EntityType": "0"
+        }
             
     def _save_ct_template(self):
         """Save the current class table template configuration.
         
-        This method saves all current field values to the ct_templates.json file,
-        creating a new template or updating an existing one.
+        This method saves field values to ct_templates.json using the same
+        approach as the objective template save for consistency.
         """
         try:
-            # Start performance tracking
-            start_time = time.time()
-            
             # Get the type ID from the selection string
             selection = self.ct_type_var.get()
             type_id = selection.split(":")[0].strip()
             
-            # Create new template with current field values
-            new_template = {}
+            # Get field values - stored as strings to make saving/loading simpler
+            fields = {}
             for field_name, string_var in self.ct_field_vars.items():
-                new_template[field_name] = string_var.get()
+                raw_value = string_var.get().strip()
+                fields[field_name] = raw_value if raw_value else "0"
             
-            # Save template using CT data handler
-            success = CTDataHandler.save_ct_template(type_id, new_template)
+            # Load existing templates
+            from utils.json_path_handler import load_json, save_json, JsonFiles
+            templates = load_json(JsonFiles.CT_TEMPLATES, default={})
+            
+            # Update the template for this type
+            templates[type_id] = fields
+            
+            # Save back to file
+            success = save_json(JsonFiles.CT_TEMPLATES, templates)
             
             if success:
-                # Log performance metrics
-                elapsed_time = time.time() - start_time
-                self.log_info(f"Saved template for class table type {type_id} in {elapsed_time:.2f} seconds")
                 messagebox.showinfo("Template Saved", f"Template for class table type {type_id} has been saved successfully.")
+                logging.info(f"Saved template for class table type {type_id}")
             else:
                 messagebox.showerror("Error", f"Failed to save template for class table type {type_id}.")
                 
         except Exception as e:
-            self.log_error("Error saving class table template", e)
+            logging.error(f"Error saving class table template: {str(e)}")
             messagebox.showerror("Error", f"Failed to save template: {str(e)}")
     
     def _reset_ct_fields(self):
-        """Reset class table fields to default values.
-        
-        This method sets all CT fields back to their default values, but doesn't save
-        the changes to the template file until the user clicks Save Template.
         """
-        try:
-            # Get current selection
-            selection = self.ct_type_var.get()
-            
-            # Confirm with user
-            if messagebox.askyesno("Confirm Reset", "Are you sure you want to reset all fields to default values?"):
-                # Create a default template
-                default_template = CTDataHandler.create_default_ct_template()
-                
-                # Update all fields with default values
-                for field_name, string_var in self.ct_field_vars.items():
-                    if field_name in default_template:
-                        string_var.set(default_template[field_name])
-                    else:
-                        string_var.set("0")  # Default for unknown fields
-                
-                self.log_info("Reset all class table fields to default values")
-                messagebox.showinfo("Fields Reset", "All fields have been reset to default values.")
+        Calculate median values for CT fields based on existing CT entries of the same type.
+        Uses the same sophisticated CT analysis as bms_injection_window.py.
+        Only updates the GUI fields, does not save data to any file.
+        """
+        import xml.etree.ElementTree as ET
+        from pathlib import Path
+        import os
+        import traceback
+        from tkinter import messagebox
         
+        # 1. Initialization - Get the selected type and validate BMS path
+        selection = self.ct_type_var.get()
+        if not selection or ':' not in selection:
+            messagebox.showerror("Error", "Please select a CT type first")
+            return False
+            
+        # Extract type key from selection string
+        type_key = int(selection.split(":")[0].strip())
+        type_name = self._get_type_name(type_key)
+        logging.info(f"RESETTING CT VALUES FOR TYPE: {type_key} ({type_name})")
+        
+        # Use the BMS path that's already loaded in the settings window
+        logging.debug(f"Starting CT reset for type {type_key} ({type_name})")
+        logging.debug(f"self.bms_path = '{self.bms_path}'")
+        logging.debug(f"type(self.bms_path) = {type(self.bms_path)}")
+        
+        if not self.bms_path:
+            logging.critical("BMS path is None or empty")
+            messagebox.showerror("Error", "BMS path is not set. Please check the BMS path in General tab.")
+            return False
+            
+        # Handle case where bms_path might be a file instead of directory
+        if os.path.isfile(self.bms_path):
+            logging.warning(f"BMS path '{self.bms_path}' is a file, extracting directory")
+            bms_path = os.path.dirname(self.bms_path)
+        else:
+            bms_path = self.bms_path
+            
+        logging.debug(f"Using BMS directory: '{bms_path}'")
+        
+        if not os.path.isdir(bms_path):
+            logging.critical(f"BMS directory does not exist: '{bms_path}'")
+            messagebox.showerror("Error", f"Invalid BMS installation directory: {bms_path}\nPlease check the BMS path in General tab.")
+            return False
+        
+        # Find the CT file with case-insensitive search
+        logging.debug(f"Searching for CT file in directory: '{bms_path}'")
+        ct_path = None
+        for ct_filename in ["Falcon4_CT.xml", "Falcon4_CT.XML"]:
+            potential_path = os.path.join(bms_path, ct_filename)
+            logging.debug(f"Checking for CT file: '{potential_path}'")
+            if os.path.exists(potential_path):
+                ct_path = potential_path
+                logging.info(f"Found CT file: '{ct_path}'")
+                break
+            else:
+                logging.debug(f"CT file not found: '{potential_path}'")
+        
+        if not ct_path:
+            logging.error(f"CT file not found in '{bms_path}' (tried both .xml and .XML)")
+            messagebox.showerror("Error", f"CT file not found in {bms_path}\nTried: Falcon4_CT.xml and Falcon4_CT.XML")
+            return False
+            
+        # Define field names to collect values for (same as bms_injection_window.py)
+        median_fields = [
+            "CollisionType", "CollisionRadius", "UpdateRate", "UpdateTolerance", 
+            "FineUpdateRange", "FineUpdateForceRange", "FineUpdateMultiplier",
+            "DamageSeed", "HitPoints", "MajorRev", "MinRev", 
+            "CreatePriority", "ManagementDomain", "Transferable", "Private", 
+            "Tangible", "Collidable", "Global", "Persistent", "Id"
+        ]
+        
+        # Dictionary to store values by field
+        field_values = {field: [] for field in median_fields}
+        
+        try:
+            # 2. CT File Processing - Load and parse the CT file
+            logging.info(f"Loading CT file: {ct_path}")
+            tree = ET.parse(ct_path)
+            root = tree.getroot()
+            
+            # Verify we have CT entries with the target type
+            matching_ct_entries = 0
+            
+            # Process all CT entries
+            for ct_elem in root.findall('.//CT'):
+                try:
+                    # Check if this is an objective CT (Domain=3, Class=4, EntityType=3)
+                    domain_elem = ct_elem.find("Domain")
+                    class_elem = ct_elem.find("Class")
+                    entity_type_elem = ct_elem.find("EntityType")
+                    type_elem = ct_elem.find("Type")
+                    
+                    if (domain_elem is not None and domain_elem.text == "3" and
+                        class_elem is not None and class_elem.text == "4" and
+                        entity_type_elem is not None and entity_type_elem.text == "3" and
+                        type_elem is not None and type_elem.text):
+                        
+                        # Get the type number (1-31)
+                        ct_type = int(type_elem.text)
+                        
+                        # Check if this matches our target type
+                        if ct_type == type_key:
+                            matching_ct_entries += 1
+                            
+                            # Extract values for all our fields of interest
+                            for field in median_fields:
+                                field_elem = ct_elem.find(field)
+                                if field_elem is not None and field_elem.text:
+                                    try:
+                                        # Convert to the appropriate type (float or int)
+                                        field_text = field_elem.text.strip()
+                                        if "." in field_text:
+                                            value = float(field_text)
+                                        else:
+                                            value = int(field_text)
+                                        field_values[field].append(value)
+                                    except (ValueError, TypeError):
+                                        # Keep as string if conversion fails
+                                        field_values[field].append(field_elem.text)
+                                        
+                except Exception as e:
+                    # Log the error but continue processing other entries
+                    logging.error(f"Error processing CT entry: {str(e)}")
+            
+            # 3. Field Value Calculation - Calculate median values for each field
+            calculated_values = {}
+            
+            for field in median_fields:
+                values = field_values[field]
+                
+                if values and len(values) > 0:
+                    # We found values for this field in CT entries
+                    if all(isinstance(v, (int, float)) for v in values):
+                        # For numeric values, calculate the median
+                        sorted_values = sorted(values)
+                        n = len(sorted_values)
+                        
+                        if n % 2 == 0:
+                            # Even number of values - average the middle two
+                            mid_right = n // 2
+                            mid_left = mid_right - 1
+                            median = (sorted_values[mid_left] + sorted_values[mid_right]) / 2
+                        else:
+                            # Odd number of values - take the middle one
+                            median = sorted_values[n // 2]
+                        
+                        # Keep integers as integers
+                        if all(isinstance(v, int) for v in values):
+                            median = int(median)
+                        
+                        calculated_values[field] = str(median)
+                    else:
+                        # For non-numeric values, use the most common value
+                        value_counts = {}
+                        for v in values:
+                            if v is not None:
+                                value_counts[v] = value_counts.get(v, 0) + 1
+                        
+                        if value_counts:
+                            most_common = max(value_counts.items(), key=lambda x: x[1])[0]
+                            calculated_values[field] = str(most_common)
+                        else:
+                            # If we can't determine the most common, use default
+                            calculated_values[field] = "0"
+                else:
+                    # No values found for this field in any CT entries
+                    # Use default values based on field type
+                    if field == "Id":
+                        calculated_values[field] = "60395"  # Common ID value
+                    elif field == "FineUpdateMultiplier":
+                        calculated_values[field] = "1.0"
+                    elif field in ["MajorRev", "MinRev"]:
+                        calculated_values[field] = "17" if field == "MajorRev" else "26"
+                    elif field in ["CreatePriority", "ManagementDomain", "Transferable"]:
+                        calculated_values[field] = "1" if field == "CreatePriority" else "2" if field == "ManagementDomain" else "1"
+                    else:
+                        calculated_values[field] = "0"
+            
+            # 4. UI Update - Update the GUI entries with calculated values
+            if not hasattr(self, 'ct_field_vars') or not self.ct_field_vars:
+                messagebox.showerror("Error", "CT field variables not initialized")
+                return False
+                
+            updated_fields = set()
+            field_count = 0
+            
+            for field_name, string_var in self.ct_field_vars.items():
+                if field_name in calculated_values and field_name not in updated_fields:
+                    value = calculated_values[field_name]
+                    # Update the string variable
+                    string_var.set(str(value))
+                    
+                    # Count updated fields and mark as updated
+                    field_count += 1
+                    updated_fields.add(field_name)
+            
+            # Show success/failure message
+            if matching_ct_entries == 0:
+                # No matching CT entries found
+                messagebox.showwarning(
+                    "No Matching CT Entries Found",
+                    f"No CT entries of type {type_key} ({type_name}) were found.\n"
+                    f"Field values have been kept as is."
+                )
+                return False
+            else:
+                # Successfully updated fields
+                messagebox.showinfo(
+                    "Reset Complete",
+                    f"Successfully calculated median values from {matching_ct_entries} existing CT entries.\n"
+                    f"Updated {field_count} fields with median values."
+                )
+                return True
+                
         except Exception as e:
-            self.log_error("Error resetting class table fields", e)
-            messagebox.showerror("Error", f"Failed to reset fields: {str(e)}")
+            # Log and display any errors
+            error_msg = f"Error resetting CT fields to defaults: {e}"
+            logging.error(error_msg)
+            traceback.print_exc()
+            messagebox.showerror("Error", error_msg)
+            return False
     
     def _init_ct_interface(self):
         """Initialize the interface for class table data.
         
         Creates all necessary UI elements for selecting and editing Class Table data.
         """
-        # Load Class Table types using the CT data handler
-        self.ct_types = CTDataHandler.load_ct_types()
+        # Load Class Table types using a better naming approach
+        self.ct_types = self._load_ct_types()
         
         # Create the CT type selection section
         ct_type_frame = Ctk.CTkFrame(self.ct_frame, fg_color="#E0E8F0")
@@ -1605,7 +2154,7 @@ This will update ONLY this specific objective type."""
         type_label.pack(side=tk.LEFT, padx=(8, 0), pady=8)
         
         # CT type dropdown
-        self.ct_type_var = tk.StringVar(value=next(iter(self.ct_types.values())) if self.ct_types else "")
+        self.ct_type_var = tk.StringVar(value=next(iter(self.ct_types.values()), "1: Airbase") if self.ct_types else "1: Airbase")
         self.ct_type_dropdown = Ctk.CTkComboBox(
             type_select_frame,
             values=list(self.ct_types.values()),
@@ -1675,28 +2224,78 @@ This will update ONLY this specific objective type."""
             font=("Arial", 12)
         )
         self.default_ct_button.pack(side=tk.LEFT, padx=8, pady=8)
-    
-    def log_error(self, message, exception=None):
-        """Log an error and display a message to the user."""
-        # Log the error
-        logging.error(message)
-        if exception:
-            logging.error(f"Exception details: {str(exception)}")
-            error_message = f"{message}: {str(exception)}"
-        else:
-            error_message = message
         
-        # Show error message to user
-        messagebox.showerror("Error", message)
-        
-        # Also log to console if parent has console_log method
-        if hasattr(self.parent, 'console_log'):
-            self.parent.console_log(error_message)
+        # Load the fields for initially selected CT type (same as objective interface)
+        if self.ct_type_var.get():
+            self._load_ct_fields(self.ct_type_var.get())
     
-    def log_info(self, message):
-        """Log information and display a message to the user."""
-        # Log the info
-        logging.info(message)
+    def _load_ct_types(self):
+        """Load Class Table types with meaningful objective type names.
+        
+        Returns:
+            dict: Dictionary of CT types with ID as key and "ID: Name" as value
+        """
+        ct_types = {}
+        
+        try:
+            # Load from ct_templates.json using json_path_handler
+            from utils.json_path_handler import load_json, JsonFiles
+            ct_templates = load_json(JsonFiles.CT_TEMPLATES, default={})
+            
+            if ct_templates:
+                for ct_id in ct_templates.keys():
+                    # Use the same objective type names as used in objective interface
+                    type_name = self._get_type_name(int(ct_id))
+                    ct_types[ct_id] = f"{ct_id}: {type_name}"
+                
+                logging.info(f"Loaded {len(ct_types)} class table types from ct_templates.json")
+            
+            # If no types found, use default fallback matching objective types
+            if not ct_types:
+                fallback_types = {
+                    "1": "1: Airbase",
+                    "2": "2: Airstrip",
+                    "3": "3: Army Base",
+                    "4": "4: Beach",
+                    "5": "5: Border",
+                    "6": "6: Bridge",
+                    "7": "7: Chemical",
+                    "8": "8: City",
+                    "9": "9: Command & Control",
+                    "10": "10: Depot",
+                    "11": "11: Factory",
+                    "12": "12: Ford",
+                    "13": "13: Fortification",
+                    "14": "14: Scenery",
+                    "15": "15: Intersect",
+                    "16": "16: Nav Beacon",
+                    "17": "17: Nuclear",
+                    "18": "18: Pass",
+                    "19": "19: Port",
+                    "20": "20: Power Plant",
+                    "21": "21: Radar",
+                    "22": "22: Radio Tower",
+                    "23": "23: Rail Terminal",
+                    "24": "24: Railroad",
+                    "25": "25: Refinery",
+                    "26": "26: Railroad",
+                    "27": "27: Seal",
+                    "28": "28: Town",
+                    "29": "29: Village",
+                    "30": "30: HARTS",
+                    "31": "31: SAM Site"
+                }
+                ct_types = fallback_types
+                logging.info("Using fallback class table types list")
+                
+        except Exception as e:
+            logging.error(f"Error loading class table types: {str(e)}")
+            # Provide minimal fallback if everything fails
+            ct_types = {"1": "1: Airbase"}
+        
+        return ct_types
+    
+# Custom logging methods removed - now using standard logging.info(), logging.error() etc. directly
     
     def _get_scrollable_content(self, scrollable_frame):
         """Get the content frame from a scrollable frame."""
@@ -1727,10 +2326,10 @@ This will update ONLY this specific objective type."""
             if hasattr(self.parent, 'save_config_file'):
                 self.parent.save_config_file()
             else:
-                self.log_error("Cannot save preset: Parent window does not have save_config_file method", None)
+                logging.error("Cannot save preset: Parent window does not have save_config_file method")
                 messagebox.showerror("Error", "Cannot save preset: Parent window does not have save_config_file method")
         except Exception as e:
-            self.log_error(f"Error saving preset: {str(e)}", e)
+            logging.error(f"Error saving preset: {str(e)}")
     
     def _load_preset(self):
         """Load configuration preset by calling MainGui's load_config method."""
@@ -1742,10 +2341,10 @@ This will update ONLY this specific objective type."""
                 # Update UI elements if needed
                 self._update_ui_from_parent()
             else:
-                self.log_error("Cannot load preset: Parent window does not have load_config method", None)
+                logging.error("Cannot load preset: Parent window does not have load_config method")
                 messagebox.showerror("Error", "Cannot load preset: Parent window does not have load_config method")
         except Exception as e:
-            self.log_error(f"Error loading preset: {str(e)}", e)
+            logging.error(f"Error loading preset: {str(e)}")
     
     def _update_ui_from_parent(self):
         """Update UI elements based on parent's shared_data."""
@@ -1760,11 +2359,6 @@ This will update ONLY this specific objective type."""
                     else:
                         self.auto_start_var.set(False)
                 
-                # Update Debugger checkbox if parent has debugger in shared_data
-                if "debugger" in self.parent.shared_data:
-                    debugger_value = self.parent.shared_data["debugger"].get()
-                    self.debugger_var.set(debugger_value)
-                
                 # Update BMS path if parent has CTpath in shared_data
                 if "CTpath" in self.parent.shared_data:
                     ct_path = self.parent.shared_data["CTpath"].get()
@@ -1777,7 +2371,7 @@ This will update ONLY this specific objective type."""
                     if backup_path:
                         self.backup_path_var.set(backup_path)
         except Exception as e:
-            self.log_error(f"Error updating UI from parent: {str(e)}", e)
+            logging.error(f"Error updating UI from parent: {str(e)}")
     
     def _toggle_auto_start(self):
         """Toggle auto-start setting.
@@ -1797,16 +2391,15 @@ This will update ONLY this specific objective type."""
             
             # Provide feedback confirmation
             status = "enabled" if self.auto_start_var.get() else "disabled"
-            self.log_info(f"Auto-start {status}")
+            logging.info(f"Auto-start {status}")
             
         except Exception as e:
-            self.log_error(f"Error toggling auto-start: {str(e)}", e)
+            logging.error(f"Error toggling auto-start: {str(e)}")
     
     def _configure_logger(self, log_level=None, log_handlers=None):
         """Configure the application logger with the specified settings.
         
         This method sets up the root logger with the specified log level and handlers.
-        It provides a more robust logging system than the previous debugger toggle.
         
         Args:
             log_level: The logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
@@ -1861,7 +2454,7 @@ This will update ONLY this specific objective type."""
                 root_logger.addHandler(file_handler)
             
             # Log confirmation
-            self.log_info(f"Logger configured with level: {level}, handlers: {', '.join(handlers)}")
+            logging.info(f"Logger configured with level: {level}, handlers: {', '.join(handlers)}")
             
             # Update parent's logging configuration if method exists
             if hasattr(self.parent, 'update_logging_config'):
@@ -1869,7 +2462,7 @@ This will update ONLY this specific objective type."""
                 
         except Exception as e:
             # Use print as a fallback in case logging is broken
-            logger.error(f"Error configuring logger: {str(e)}", e)
+            logging.error(f"Error configuring logger: {str(e)}")
     
     def _open_console_window(self):
         """Open console window by calling parent's open_console_window method."""
@@ -1878,10 +2471,10 @@ This will update ONLY this specific objective type."""
             if hasattr(self.parent, 'open_console_window'):
                 self.parent.open_console_window()
             else:
-                self.log_error("Cannot open console window: Parent window does not have open_console_window method", None)
+                logging.error("Cannot open console window: Parent window does not have open_console_window method")
                 messagebox.showerror("Error", "Cannot open console window: Parent window does not have open_console_window method")
         except Exception as e:
-            self.log_error(f"Error opening console window: {str(e)}", e)
+            logging.error(f"Error opening console window: {str(e)}")
     
     def _save_and_destroy_task(self):
         """Saves checkbox states and then destroys the window.
@@ -1891,48 +2484,46 @@ This will update ONLY this specific objective type."""
         """
         task_start_time = time.perf_counter()
         elapsed_task_start = task_start_time - self._creation_time
-        self.log_info(f"[{elapsed_task_start:.4f}s] Deferred task: _save_and_destroy_task started.")
+        logging.info(f"[{elapsed_task_start:.4f}s] Deferred task: _save_and_destroy_task started.")
         
         try:
             save_start_time = time.perf_counter()
             elapsed_before_save = save_start_time - self._creation_time
-            self.log_info(f"[{elapsed_before_save:.4f}s] Deferred task: Calling _save_checkbox_states().")
+            logging.info(f"[{elapsed_before_save:.4f}s] Deferred task: Calling _save_checkbox_states().")
             
             self._save_checkbox_states() # Now this runs deferred
             
             save_end_time = time.perf_counter()
             elapsed_after_save = save_end_time - self._creation_time
             duration_save = save_end_time - save_start_time
-            self.log_info(f"[{elapsed_after_save:.4f}s] Deferred task: _save_checkbox_states() completed in {duration_save:.4f}s.")
+            logging.info(f"[{elapsed_after_save:.4f}s] Deferred task: _save_checkbox_states() completed in {duration_save:.4f}s.")
             
         except Exception as e:
             save_error_time = time.perf_counter()
             elapsed_save_error = save_error_time - self._creation_time
-            self.log_error(f"[{elapsed_save_error:.4f}s] Error during deferred saving of checkbox states: {str(e)}", e)
+            logging.error(f"[{elapsed_save_error:.4f}s] Error during deferred saving of checkbox states: {str(e)}")
         finally:
             # Ensure destroy is called even if saving fails or an error occurs during saving
             if self.winfo_exists():
                 destroy_start_time = time.perf_counter()
                 elapsed_before_destroy = destroy_start_time - self._creation_time
-                self.log_info(f"[{elapsed_before_destroy:.4f}s] Deferred task: Calling self.destroy().")
+                logging.info(f"[{elapsed_before_destroy:.4f}s] Deferred task: Calling self.destroy().")
                 try:
                     self.destroy()
                     destroy_end_time = time.perf_counter()
                     elapsed_after_destroy = destroy_end_time - self._creation_time
                     duration_destroy = destroy_end_time - destroy_start_time
-                    self.log_info(f"[{elapsed_after_destroy:.4f}s] Deferred task: Window destroyed successfully in {duration_destroy:.4f}s.")
+                    logging.info(f"[{elapsed_after_destroy:.4f}s] Deferred task: Window destroyed successfully in {duration_destroy:.4f}s.")
                 except Exception as e_destroy:
                     destroy_error_time = time.perf_counter()
                     elapsed_destroy_error = destroy_error_time - self._creation_time
-                    self.log_error(f"[{elapsed_destroy_error:.4f}s] Error during deferred window destruction: {str(e_destroy)}", e_destroy)
+                    logging.error(f"[{elapsed_destroy_error:.4f}s] Error during deferred window destruction: {str(e_destroy)}")
             else:
                 no_destroy_time = time.perf_counter()
                 elapsed_no_destroy = no_destroy_time - self._creation_time
-                self.log_info(f"[{elapsed_no_destroy:.4f}s] Deferred task: Window no longer exists, skipping destroy.")
+                logging.info(f"[{elapsed_no_destroy:.4f}s] Deferred task: Window no longer exists, skipping destroy.")
 
     def _on_close(self):
-        import sys
-        print("DEBUG: SettingsWindow._on_close() CALLED", file=sys.stderr)
         """Schedules the window to save settings and then close.
         
         This method is called when the user closes the window. It immediately
@@ -1942,20 +2533,20 @@ This will update ONLY this specific objective type."""
         try:
             # Log the action immediately
             elapsed_on_close = time.perf_counter() - self._creation_time
-            self.log_info(f"[{elapsed_on_close:.4f}s] Settings window close requested. Scheduling save and destroy task.")
+            logging.info(f"[{elapsed_on_close:.4f}s] Settings window close requested. Scheduling save and destroy task.")
             
             # Schedule the save and destroy operation to run when idle
             self.after_idle(self._save_and_destroy_task)
         except Exception as e:
-            self.log_error(f"Error in _on_close while scheduling save/destroy task: {str(e)}", e)
+            logging.error(f"Error in _on_close while scheduling save/destroy task: {str(e)}")
             # Fallback: If scheduling itself fails, try to destroy immediately.
             # This might hang if the original problem was in destroy(), but it's a last resort.
             if self.winfo_exists():
                 try:
-                    self.log_info("Fallback: Attempting immediate destroy due to error in _on_close scheduling.")
+                    logging.info("Fallback: Attempting immediate destroy due to error in _on_close scheduling.")
                     self.destroy()
                 except Exception as e_destroy:
-                    self.log_error(f"Error during fallback immediate destroy: {str(e_destroy)}", e_destroy)
+                    logging.error(f"Error during fallback immediate destroy: {str(e_destroy)}")
     
     def _save_checkbox_states(self):
         """Save the states of all checkboxes in the settings window.
@@ -1987,9 +2578,9 @@ This will update ONLY this specific objective type."""
                     else:
                         self.parent.shared_data['auto_start'] = tk.StringVar(value=auto_start_value)
                 
-                self.log_info("Saved checkbox states to shared data")
+                logging.info("Saved checkbox states to shared data")
         except Exception as e:
-            self.log_error(f"Error saving checkbox states: {str(e)}", e)
+            logging.error(f"Error saving checkbox states: {str(e)}")
     
     def _apply_logging_settings(self):
         """Apply the logging settings from the UI controls.
@@ -2020,9 +2611,9 @@ This will update ONLY this specific objective type."""
         # Apply the settings using the parent's update_logging_config method
         if hasattr(self.parent, 'update_logging_config'):
             self.parent.update_logging_config(level=log_level_str, handlers=handlers)
-            self.log_info(f"Applied logging settings: Level={log_level_str}, Method UI='{log_method_ui_str}' (Handlers: {handlers})")
+            logging.info(f"Applied logging settings: Level={log_level_str}, Method UI='{log_method_ui_str}' (Handlers: {handlers})")
         else:
-            self.log_error("Parent does not have update_logging_config method.")
+            logging.error("Parent does not have update_logging_config method.")
             messagebox.showerror("Error", "Failed to apply logging settings: Parent context error.")
             return
 
@@ -2037,9 +2628,9 @@ This will update ONLY this specific objective type."""
                 self.parent.shared_data["logging_method"].set(storable_log_method) # Save the simple form
             else: 
                 self.parent.shared_data["logging_method"] = tk.StringVar(value=storable_log_method)
-            self.log_info("Updated shared_data with new logging settings.")
+            logging.info("Updated shared_data with new logging settings.")
         else:
-            self.log_error("Parent does not have shared_data attribute.")
+            logging.error("Parent does not have shared_data attribute.")
 
         # Create a simple message for the confirmation dialog
         message = "Logging settings have been applied.\n\n"
@@ -2066,11 +2657,10 @@ if __name__ == '__main__':
                     "BMS_Database_Path": tk.StringVar(value="C:/BMS/Data"),
                     "backup_CTpath": tk.StringVar(value="C:/BMS/Backup"),
                     "Startup": tk.StringVar(),
-                    "debugger": tk.BooleanVar()
                 }
             
             def console_log(self, message):
-                logger.info(f"[CONSOLE] {message}")
+                logging.info(f"[CONSOLE] {message}")
         
         # Create root window
         root = tk.Tk()
@@ -2095,5 +2685,5 @@ if __name__ == '__main__':
         # Start the main loop
         root.mainloop()
     else:
-        logger.error("SettingsWindow is not a Toplevel widget. Unable to run standalone.")
+        logging.error("SettingsWindow is not a Toplevel widget. Unable to run standalone.")
         sys.exit(1)

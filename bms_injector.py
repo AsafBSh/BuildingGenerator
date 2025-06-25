@@ -17,9 +17,8 @@ from components.objective_cache import cache as objective_cache
 from utils.json_path_handler import load_json, save_json, get_json_path, JsonFiles
 from tkinter import messagebox
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("bms_injector")
+# Set up logging - use standard pattern to inherit from main application
+logger = logging.getLogger(__name__)
 
 class BmsInjector:
     """
@@ -29,13 +28,15 @@ class BmsInjector:
     by modifying XML files in the BMS directory structure.
     """
     
-    def __init__(self, bms_path, backup=True):
+    def __init__(self, bms_path, backup=True, backup_features=True, auto_create_templates=True):
         """
         Initialize the BMS injector.
         
         Args:
             bms_path (str): Path to the BMS installation directory
             backup (bool): Whether to create backups before modifying files
+            backup_features (bool): Whether to backup generated features in the Generated folder
+            auto_create_templates (bool): Whether to automatically create templates during initialization
         """
         # Convert to Path object and normalize
         if bms_path:
@@ -43,8 +44,14 @@ class BmsInjector:
         else:
             self.bms_path = Path()
             logger.warning("No BMS path provided, using defaults")
-            
+        
         self.backup = backup
+        self.backup_features = backup_features
+        self.auto_create_templates = auto_create_templates
+        self.templates_need_creation = False
+        
+        # Log backup settings to aid debugging
+        logger.info(f"BMS Injector initialized with backup={self.backup}, backup_features={self.backup_features}")
         
         # Create Generated folder for temporary files
         self.generated_dir = Path("Generated")
@@ -88,8 +95,11 @@ class BmsInjector:
         elif not self.is_valid_installation:
             # If invalid installation, use default templates only
             logger.warning("Invalid BMS installation, using default templates")
-            self.objective_templates = self._create_default_templates()
-            self.ct_templates = self._create_default_ct_templates()
+            if self.auto_create_templates:
+                self.objective_templates = self._create_default_templates()
+                self.ct_templates = self._create_default_ct_templates()
+            else:
+                self.templates_need_creation = True
     
     def _find_ct_file(self) -> Path:
         """Find the CT file in common locations."""
@@ -170,18 +180,28 @@ class BmsInjector:
         if self.ct_templates:
             logger.info("Loaded CT templates from data_components directory")
         
-        # If templates are still empty, try to create default ones
+        # If templates are still empty, flag the need to create them or create them immediately
         if not self.objective_templates:
-            logger.info("No objective templates found, creating defaults")
-            self.objective_templates = self._create_default_templates()
-            # Save the defaults for future use
-            save_json(JsonFiles.OBJECTIVE_TEMPLATES, self.objective_templates)
+            logger.info("No objective templates found")
+            if self.auto_create_templates:
+                logger.info("Auto-creating objective templates")
+                self.objective_templates = self._create_default_templates()
+                # Save the defaults for future use
+                save_json(JsonFiles.OBJECTIVE_TEMPLATES, self.objective_templates)
+            else:
+                logger.info("Template creation deferred, will need to create objective templates later")
+                self.templates_need_creation = True
         
         if not self.ct_templates:
-            logger.info("No CT templates found, creating defaults")
-            self.ct_templates = self._create_default_ct_templates()
-            # Save the defaults for future use
-            save_json(JsonFiles.CT_TEMPLATES, self.ct_templates)
+            logger.info("No CT templates found")
+            if self.auto_create_templates:
+                logger.info("Auto-creating CT templates")
+                self.ct_templates = self._create_default_ct_templates()
+                # Save the defaults for future use
+                save_json(JsonFiles.CT_TEMPLATES, self.ct_templates)
+            else:
+                logger.info("Template creation deferred, will need to create CT templates later")
+                self.templates_need_creation = True
     
     def save_templates(self):
         """Save current templates to JSON files."""
@@ -274,7 +294,7 @@ class BmsInjector:
                             field_data["total"] += value
             
             except Exception as e:
-                print(f"Error processing {ocd_file}: {e}")
+                logger.error(f"Error processing {ocd_file}: {e}")
         
         # Calculate median/most common values
         for obj_type, template in type_data.items():
@@ -328,7 +348,7 @@ class BmsInjector:
             
             return None
         except Exception as e:
-            print(f"Error getting objective type: {e}")
+            logger.error(f"Error getting objective type: {e}")
             return None
     
     def is_objective_ct(self, ct_num):
@@ -355,7 +375,7 @@ class BmsInjector:
             
             return False
         except Exception as e:
-            print(f"Error checking if CT is objective: {e}")
+            logger.error(f"Error checking if CT is objective: {e}")
             return False
     
     def objective_exists(self, obj_num):
@@ -452,18 +472,9 @@ class BmsInjector:
             templates = self._create_default_templates()
             objective_cache.set_objective_templates(templates)
         
-        # Create comprehensive CT templates based on analyzed data
-        comprehensive_templates = self._create_comprehensive_ct_templates()
-        
-        # Create CT templates based on analyzed data
-        if not self.ct_templates:
-            self.ct_templates = self._create_ct_templates()
-            # Save to ct_templates.json in cache directory
-            cache_dir = Path("data_components")
-            cache_dir.mkdir(exist_ok=True)
-            
-            with open(cache_dir / "ct_templates.json", "w") as f:
-                json.dump(self.ct_templates, f, indent=2)
+        # CT templates are now only created in the BMS injection window
+        # This improves performance for users who don't need BMS injection
+        self.ct_templates = {}
         
         # Save the cache
         objective_cache.save_cache()
@@ -718,11 +729,220 @@ class BmsInjector:
     
     def _create_default_templates(self) -> Dict[str, Dict[str, str]]:
         """
-        Create default templates for each objective type.
+        Create templates for each objective type based on OCD files.
+        If OCD files are not available, creates templates with default values.
+        
+        Returns:
+            Dictionary of templates indexed by type number
+        """
+        logger.info("Creating objective templates from OCD files")
+        
+        # Find ObjectiveRelatedData directory
+        obj_related_data_dir = self._find_objective_dir()
+        if not obj_related_data_dir or not obj_related_data_dir.exists() or not obj_related_data_dir.is_dir():
+            logger.warning(f"ObjectiveRelatedData directory not found. Using default templates.")
+            return self._create_empty_templates()
+            
+        # Dictionary to map CT indexes to their types
+        ct_idx_to_type = {}
+        
+        # First pass: build a mapping of CT indexes to their types from CT file
+        try:
+            ct_tree = ET.parse(self.ct_file)
+            ct_root = ct_tree.getroot()
+            
+            for ct in ct_root.findall("CT"):
+                try:
+                    # Check if this is an objective (Domain=3, Class=4, EntityType=3)
+                    domain_elem = ct.find("Domain")
+                    class_elem = ct.find("Class")
+                    entity_type_elem = ct.find("EntityType")
+                    type_elem = ct.find("Type")
+                    num_attr = ct.get("Num")
+                    
+                    if (domain_elem is not None and domain_elem.text == "3" and
+                        class_elem is not None and class_elem.text == "4" and
+                        entity_type_elem is not None and entity_type_elem.text == "3" and
+                        type_elem is not None and type_elem.text and
+                        num_attr is not None):
+                        
+                        # Store the mapping: CT index -> objective type
+                        ct_idx = num_attr
+                        obj_type = int(type_elem.text)
+                        
+                        if obj_type >= 1 and obj_type <= 31:
+                            ct_idx_to_type[ct_idx] = obj_type
+                except Exception as e:
+                    logger.warning(f"Error processing CT entry: {e}")
+            
+            logger.info(f"Found {len(ct_idx_to_type)} objective types in CT file")
+        except Exception as e:
+            logger.error(f"Error parsing CT file: {e}")
+            return self._create_empty_templates()
+            
+        # Fields to calculate median for
+        median_fields = [
+            "DataRate", "DeaggDistance", "Det_NoMove", "Det_Foot", "Det_Wheeled",
+            "Det_Tracked", "Det_LowAir", "Det_Air", "Det_Naval", "Det_Rail",
+            "Dam_None", "Dam_Penetration", "Dam_HighExplosive", "Dam_Heave", "Dam_Incendairy",
+            "Dam_Proximity", "Dam_Kinetic", "Dam_Hydrostatic", "Dam_Chemical", "Dam_Nuclear",
+            "Dam_Other", "ObjectiveIcon"
+        ]
+        
+        # Dictionary to store values by objective type
+        type_values = {}
+        
+        # Initialize all types with empty field lists
+        for obj_type in range(1, 32):
+            type_values[obj_type] = {field: [] for field in median_fields}
+            
+        # Scan all OCD directories and files
+        ocd_count = 0
+        logger.info(f"Scanning OCD files in: {obj_related_data_dir}")
+        
+        # Loop through all subdirectories in ObjectiveRelatedData
+        for ocd_dir in obj_related_data_dir.iterdir():
+            if not ocd_dir.is_dir() or not ocd_dir.name.startswith("OCD_"):
+                continue
+                
+            # Look for the OCD XML file in this directory
+            ocd_file = None
+            for file in ocd_dir.iterdir():
+                if file.is_file() and file.name.startswith("OCD_") and file.suffix.upper() == ".XML":
+                    ocd_file = file
+                    break
+            
+            if ocd_file is None:
+                continue
+                
+            logger.debug(f"Processing OCD file: {ocd_file}")
+            
+            try:
+                # Parse the OCD file
+                ocd_tree = ET.parse(ocd_file)
+                ocd_root = ocd_tree.getroot()
+                ocd_elem = ocd_root.find("OCD")
+                
+                if ocd_elem is None:
+                    continue
+                
+                # Get the CT index to find the objective type
+                ct_idx_elem = ocd_elem.find("CtIdx")
+                if ct_idx_elem is None or not ct_idx_elem.text:
+                    continue
+                
+                ct_idx = ct_idx_elem.text
+                if ct_idx not in ct_idx_to_type:
+                    continue
+                
+                # Get the objective type for this OCD
+                obj_type = ct_idx_to_type[ct_idx]
+                
+                # Collect values for each field
+                for field in median_fields:
+                    field_elem = ocd_elem.find(field)
+                    if field_elem is not None and field_elem.text:
+                        try:
+                            # Try to convert to appropriate numeric type
+                            if "." in field_elem.text:
+                                value = float(field_elem.text)
+                            else:
+                                value = int(field_elem.text)
+                            type_values[obj_type][field].append(value)
+                        except (ValueError, TypeError):
+                            # For non-numeric values, keep as string
+                            type_values[obj_type][field].append(field_elem.text)
+                
+                ocd_count += 1
+            except Exception as e:
+                logger.warning(f"Error processing OCD file {ocd_file}: {e}")
+                
+        logger.info(f"Processed {ocd_count} OCD files.")
+        
+        # Calculate median values and create the templates
+        templates = {}
+        
+        # Create a default template for any missing types
+        basic_template = {field: "0" for field in median_fields}
+        basic_template["RadarFeature"] = "0"  # Add constant field
+        
+        # Generate templates for all 31 objective types
+        for obj_type in range(1, 32):
+            template = {}
+            
+            # Calculate median values for all fields
+            for field in median_fields:
+                values = type_values[obj_type][field]
+                
+                if values and len(values) > 0:
+                    # We have some values from OCD files
+                    if all(isinstance(v, (int, float)) for v in values):
+                        # Calculate median for numeric values
+                        sorted_values = sorted(values)
+                        n = len(sorted_values)
+                        
+                        if n % 2 == 0:
+                            # Even number of values, average the middle two
+                            mid_right = n // 2
+                            mid_left = mid_right - 1
+                            median = (sorted_values[mid_left] + sorted_values[mid_right]) / 2
+                        else:
+                            # Odd number of values, take the middle one
+                            median = sorted_values[n // 2]
+                            
+                        # Keep integers as integers if all values were integers
+                        if all(isinstance(v, int) for v in values):
+                            median = int(median)
+                            
+                        template[field] = str(median)
+                        logger.debug(f"Type {obj_type} {field}: Using median {median} from {len(values)} values")
+                    else:
+                        # For non-numeric values, use the most common value
+                        value_counts = {}
+                        for v in values:
+                            if v is not None:
+                                value_counts[v] = value_counts.get(v, 0) + 1
+                                
+                        if value_counts:
+                            most_common = max(value_counts.items(), key=lambda x: x[1])[0]
+                            template[field] = str(most_common)
+                            logger.debug(f"Type {obj_type} {field}: Using most common value {most_common}")
+                        else:
+                            # Fallback to default - use 0
+                            template[field] = "0"
+                            logger.debug(f"Type {obj_type} {field}: No valid values, using 0")
+                else:
+                    # No values found for this field, use 0
+                    template[field] = "0"
+                    logger.debug(f"Type {obj_type} {field}: No OCD values found, using 0")
+            
+            # Add constant values
+            template["RadarFeature"] = "0"  # Constant value per requirements
+            
+            # Add the template to the dictionary
+            if template:
+                templates[str(obj_type)] = template
+            else:
+                # If no template was created for this type, use the basic template
+                templates[str(obj_type)] = basic_template.copy()
+                logger.debug(f"Using empty template for objective type {obj_type} (no OCD data found)")
+        
+        # Save the templates to JSON file
+        from utils.json_path_handler import save_json, JsonFiles
+        save_json(JsonFiles.OBJECTIVE_TEMPLATES, templates)
+        logger.info(f"Saved objective templates with real values from OCD files")
+            
+        return templates
+        
+    def _create_empty_templates(self) -> Dict[str, Dict[str, str]]:
+        """
+        Create empty templates with all zeros when no OCD data is available.
         
         Returns:
             Dictionary of default templates indexed by type number
         """
+        logger.warning("Creating empty objective templates with default values")
+        
         # Basic template with common fields
         basic_template = {
             "DataRate": "0",
@@ -754,6 +974,87 @@ class BmsInjector:
         templates = {}
         for i in range(1, 32):
             templates[str(i)] = basic_template.copy()
+        
+        return templates
+    
+    def _create_default_ct_templates(self) -> Dict[str, Dict[str, str]]:
+        """
+        Create default CT templates for all objective types.
+        
+        Returns:
+            Dictionary of CT templates indexed by type number
+        """
+        # Create a minimal template for each objective type (1-31)
+        templates = {}
+        logger.info("Creating default CT templates")
+        
+        # Fields that need default values
+        median_fields = [
+            "CollisionType", "CollisionRadius", "UpdateRate", "UpdateTolerance", 
+            "FineUpdateRange", "FineUpdateForceRange", "FineUpdateMultiplier",
+            "DamageSeed", "HitPoints", "MajorRev", "MinRev", 
+            "CreatePriority", "ManagementDomain", "Transferable", "Private", 
+            "Tangible", "Collidable", "Global", "Persistent", "Id"
+        ]
+        
+        # Create template for each objective type
+        for obj_type in range(1, 32):
+            # Create template with default values
+            template = {}
+            
+            # Set default value for all fields
+            for field in median_fields:
+                template[field] = "0"
+                
+            # Add constant values
+            constant_values = {
+                "Domain": "3",
+                "Class": "4",
+                "SubType": "255",
+                "Specific": "255",
+                "Owner": "0",
+                "Class_6": "255",
+                "Class_7": "255",
+                "GraphicsNormal": "0",
+                "GraphicsRepaired": "0",
+                "GraphicsDamaged": "0",
+                "GraphicsDestroyed": "0",
+                "GraphicsLeftDestroyed": "0",
+                "GraphicsRightDestroyed": "0",
+                "GraphicsBothDestroyed": "0",
+                "MoverDefinitionData": "0",
+                "EntityType": "3"
+            }
+            
+            # Create a new template with fields in the exact requested order
+            ordered_template = {}
+            
+            # Add Id field first
+            ordered_template["Id"] = template.get("Id", "60395")
+            
+            # First the median fields
+            ordered_template["CollisionType"] = template.get("CollisionType", "0")
+            ordered_template["CollisionRadius"] = template.get("CollisionRadius", "0")
+            
+            # Then add constant values in the specified order
+            for field in ["Domain", "Class", "SubType", "Specific", "Owner", "Class_6", "Class_7"]:
+                ordered_template[field] = constant_values[field]
+            
+            # Add remaining median fields in the specified order
+            for field in ["UpdateRate", "UpdateTolerance", "FineUpdateRange", "FineUpdateForceRange", 
+                          "FineUpdateMultiplier", "DamageSeed", "HitPoints", "MajorRev", "MinRev",
+                          "CreatePriority", "ManagementDomain", "Transferable", "Private", 
+                          "Tangible", "Collidable", "Global", "Persistent"]:
+                ordered_template[field] = template.get(field, "0")
+            
+            # Add remaining constant fields in the specified order
+            for field in ["GraphicsNormal", "GraphicsRepaired", "GraphicsDamaged", "GraphicsDestroyed",
+                          "GraphicsLeftDestroyed", "GraphicsRightDestroyed", "GraphicsBothDestroyed",
+                          "MoverDefinitionData", "EntityType"]:
+                ordered_template[field] = constant_values[field]
+            
+            # Add to templates
+            templates[str(obj_type)] = ordered_template
         
         return templates
     
@@ -795,6 +1096,11 @@ class BmsInjector:
 
     def _backup_ct_file(self):
         """Create a backup of the CT file in the Backupfiles folder."""
+        # Skip backup if backup setting is disabled
+        if not self.backup:
+            logger.debug(f"Skipping CT file backup due to disabled backup setting")
+            return None
+            
         if not self.ct_file.exists():
             logger.warning(f"CT file not found, cannot backup: {self.ct_file}")
             return None
@@ -827,10 +1133,15 @@ class BmsInjector:
         
         Args:
             obj_num (int): Objective number to backup
-        
+            
         Returns:
             Path: Path to the backup directory or None if backup failed
         """
+        # Skip backup if backup setting is disabled
+        if not self.backup:
+            logger.info(f"Skipping objective {obj_num} backup due to disabled backup setting (self.backup={self.backup})")
+            return None
+            
         obj_num_str = f"{obj_num:05d}"
         obj_dir = self.objective_dir / f"OCD_{obj_num_str}"
         
@@ -862,13 +1173,14 @@ class BmsInjector:
         except Exception as e:
             logger.error(f"Failed to backup objective {obj_num}: {e}")
             return None
-
+        
     def _create_ct_templates(self) -> Dict[str, Dict[str, str]]:
         """
         Create templates for CT elements based on objective type.
         
         This extracts typical values from existing CTs by type and creates template
         dictionaries that can be used when creating new CT elements.
+        This function should only be called from the BMS injection window.
         
         Returns:
             Dictionary of CT templates indexed by type number
@@ -1053,6 +1365,18 @@ class BmsInjector:
             template["Type"] = str(i)
             templates[str(i)] = template
         
+        # Save templates to cache for future use (functionality moved from _create_comprehensive_ct_templates)
+        try:
+            cache_dir = Path("data_components")
+            cache_dir.mkdir(exist_ok=True)
+            
+            with open(cache_dir / "ct_templates.json", "w") as f:
+                json.dump(templates, f, indent=2)
+            
+            logger.info(f"Saved CT templates for {len(templates)} objective types")
+        except Exception as e:
+            logger.error(f"Error saving CT templates: {e}")
+        
         return templates
     
     def _update_ct_file(self, ct_num, obj_type, name, backup=True, obj_num=None):
@@ -1073,8 +1397,8 @@ class BmsInjector:
             logger.warning(f"CT file not found, cannot update: {self.ct_file}")
             return False
             
-        # Create a backup of the CT file before modifying if requested
-        if backup:
+        # Create a backup of the CT file before modifying only if backups are enabled and requested
+        if self.backup and backup:
             self._backup_ct_file()
         
         # Convert obj_type to string and ensure it's valid
@@ -1082,7 +1406,7 @@ class BmsInjector:
             # Explicitly convert to int first to validate it's a number
             obj_type_int = int(obj_type)
             obj_type_str = str(obj_type_int)
-            print(f"DEBUG: _update_ct_file - Converting type from {obj_type} to int {obj_type_int} to str {obj_type_str}")
+            logger.debug(f"Converting type from {obj_type} to int {obj_type_int} to str {obj_type_str}")
             logger.info(f"Setting objective type {obj_type_str} for CT {ct_num}")
         except (ValueError, TypeError):
             logger.error(f"Invalid objective type: {obj_type}, must be a number")
@@ -1093,17 +1417,19 @@ class BmsInjector:
             tree = ET.parse(self.ct_file)
             root = tree.getroot()
             
-            # Load comprehensive templates that include ALL fields with proper categorization
-            cache_file = Path("data_components") / "comprehensive_ct_templates.json"
+            # Load templates from ct_templates.json file
+            cache_file = Path("data_components") / "ct_templates.json"
             if cache_file.exists():
                 try:
                     with open(cache_file, "r") as f:
                         ct_templates = json.load(f)
+                        logger.info(f"Loaded CT templates from {cache_file}")
                 except Exception as e:
-                    logger.warning(f"Error loading comprehensive CT templates: {e}")
-                    ct_templates = self._create_comprehensive_ct_templates()
+                    logger.warning(f"Error loading CT templates: {e}, calculating templates")
+                    ct_templates = self._create_default_ct_templates()
             else:
-                ct_templates = self._create_comprehensive_ct_templates()
+                logger.warning(f"CT templates file not found at {cache_file}, calculating templates")
+                ct_templates = self._create_default_ct_templates()
             
             # Get template for this objective type
             ct_template = ct_templates.get(obj_type_str, {})
@@ -1313,10 +1639,17 @@ class BmsInjector:
         # We need to reimplement the core functionality without calling create_objective
         # to avoid the duplicate backup of the CT file
         
-        # Create a temporary copy in the Generated folder
+        # Define timestamp and temporary directory variables
         timestamp = time.strftime("%Y%m%d_%H%M%S")
-        tmp_dir = self.generated_dir / f"OCD_{obj_num_str}-{timestamp}"
-        os.makedirs(tmp_dir, exist_ok=True)
+        tmp_dir = None
+
+        # Only set up backup directory if backup_features is enabled
+        if self.backup_features:
+            tmp_dir = self.generated_dir / f"OCD_{obj_num_str}-{timestamp}"
+            os.makedirs(tmp_dir, exist_ok=True)
+            logger.debug(f"Created backup directory for generated features: {tmp_dir}")
+        else:
+            logger.debug("Skipping backup directory creation - backup_features disabled")
         
         # Create objective directory if needed
         os.makedirs(self.objective_dir / f"OCD_{obj_num_str}", exist_ok=True)
@@ -1401,251 +1734,6 @@ class BmsInjector:
         
         return True
 
-    def _create_comprehensive_ct_templates(self) -> Dict[str, Dict[str, str]]:
-        """
-        Create comprehensive templates for CT elements by analyzing all CTs in the Falcon4_CT.xml file.
-        Categorizes fields into:
-        1. Constants: Same for all objective CTs
-        2. Type-specific: Fields that vary by objective type
-        3. Median fields: Fields that should use median values from the same type
-        4. Unique fields: Fields that are unique to each CT
-        
-        Returns:
-            Dict mapping objective types to template data with all field categories
-        """
-        if not self.ct_file.exists():
-            logger.warning(f"CT file not found, cannot create templates: {self.ct_file}")
-            return self._create_default_ct_templates()
-        
-        try:
-            # Parse the CT file
-            tree = ET.parse(self.ct_file)
-            root = tree.getroot()
-            
-            # Dictionary to collect objective CT data by type
-            objective_cts = {}
-            
-            # Define the EXACT field order based on the example - NO ADDITIONAL FIELDS
-            field_order = [
-                "Id", "CollisionType", "CollisionRadius", "Domain", "Class", "Type",
-                "SubType", "Specific", "Owner", "Class_6", "Class_7", "UpdateRate",
-                "UpdateTolerance", "FineUpdateRange", "FineUpdateForceRange", 
-                "FineUpdateMultiplier", "DamageSeed", "HitPoints", "MajorRev", "MinRev",
-                "CreatePriority", "ManagementDomain", "Transferable", "Private", "Tangible",
-                "Collidable", "Global", "Persistent", "GraphicsNormal", "GraphicsRepaired",
-                "GraphicsDamaged", "GraphicsDestroyed", "GraphicsLeftDestroyed", 
-                "GraphicsRightDestroyed", "GraphicsBothDestroyed", "MoverDefinitionData",
-                "EntityType", "EntityIdx"
-            ]
-            
-            # Lists of fields by category
-            constant_fields = [
-                "Id", "CollisionType", "CollisionRadius", "Domain", "Class",
-                "Owner", "Class_6", "Class_7", "DamageSeed", "HitPoints",
-                "MajorRev", "MinRev", "CreatePriority", "ManagementDomain",
-                "GraphicsNormal", "GraphicsRepaired", "GraphicsDamaged", 
-                "GraphicsDestroyed", "GraphicsLeftDestroyed", "GraphicsRightDestroyed", 
-                "GraphicsBothDestroyed", "MoverDefinitionData", "EntityType"
-            ]
-            
-            specific_fields = [
-                "Type", "EntityIdx"
-            ]
-            
-            median_fields = [
-                "SubType", "Specific", "UpdateRate", "UpdateTolerance",
-                "FineUpdateRange", "FineUpdateForceRange", "FineUpdateMultiplier",
-                "Transferable", "Private", "Tangible", "Collidable", "Persistent",
-                "Global"
-            ]
-            
-            # First pass: collect all CTs that are objectives and categorize by type
-            for ct in root.findall("CT"):
-                try:
-                    # Check if it's an objective (EntityType = 3)
-                    entity_type_elem = ct.find("EntityType")
-                    if entity_type_elem is None or entity_type_elem.text != "3":
-                        continue
-                    
-                    # Get type
-                    type_elem = ct.find("Type")
-                    if type_elem is None or not type_elem.text:
-                        continue
-                    
-                    ct_type = type_elem.text
-                    
-                    # Initialize type collection if not already present
-                    if ct_type not in objective_cts:
-                        objective_cts[ct_type] = {
-                            "count": 0,
-                            "constant_values": {},
-                            "median_fields": {field: [] for field in median_fields}
-                        }
-                    
-                    objective_cts[ct_type]["count"] += 1
-                    
-                    # Collect values for median fields
-                    for field in median_fields:
-                        field_elem = ct.find(field)
-                        if field_elem is not None and field_elem.text:
-                            objective_cts[ct_type]["median_fields"][field].append(field_elem.text)
-                    
-                    # For first CT of this type, get constant field values
-                    if objective_cts[ct_type]["count"] == 1:
-                        for field in constant_fields:
-                            field_elem = ct.find(field)
-                            if field_elem is not None and field_elem.text:
-                                objective_cts[ct_type]["constant_values"][field] = field_elem.text
-                
-                except Exception as e:
-                    logger.warning(f"Error processing CT element: {e}")
-            
-            # Create comprehensive templates for each type
-            templates = {}
-            
-            # Standard default values if no CT data is found
-            default_constant_values = {
-                "Id": "60395",
-                "CollisionType": "0",
-                "CollisionRadius": "0.000",
-                "Domain": "3",
-                "Class": "4",
-                "Owner": "0",
-                "Class_6": "255",
-                "Class_7": "255",
-                "DamageSeed": "0",
-                "HitPoints": "0",
-                "MajorRev": "17",
-                "MinRev": "26",
-                "CreatePriority": "1",
-                "ManagementDomain": "2",
-                "GraphicsNormal": "0",
-                "GraphicsRepaired": "0",
-                "GraphicsDamaged": "0",
-                "GraphicsDestroyed": "0",
-                "GraphicsLeftDestroyed": "0",
-                "GraphicsRightDestroyed": "0",
-                "GraphicsBothDestroyed": "0",
-                "MoverDefinitionData": "0",
-                "EntityType": "3"
-            }
-            
-            default_median_values = {
-                "SubType": "255",
-                "Specific": "255",
-                "UpdateRate": "0",
-                "UpdateTolerance": "0",
-                "FineUpdateRange": "150000.000",
-                "FineUpdateForceRange": "0.000",
-                "FineUpdateMultiplier": "1.000",
-                "Transferable": "1",
-                "Private": "0",
-                "Tangible": "0",
-                "Collidable": "0",
-                "Persistent": "0",
-                "Global": "0"
-            }
-            
-            # Process each objective type
-            for obj_type, data in objective_cts.items():
-                template = {}
-                
-                # Add constant fields
-                for field, value in data["constant_values"].items():
-                    template[field] = value
-                
-                # For missing constant fields, use defaults
-                for field in constant_fields:
-                    if field not in template:
-                        template[field] = default_constant_values.get(field, "")
-                
-                # Calculate median values for each median field
-                for field, values in data["median_fields"].items():
-                    if values:
-                        # Try to convert all values to numbers for accurate median
-                        try:
-                            numeric_values = []
-                            all_numeric = True
-                            for v in values:
-                                if "." in v:
-                                    numeric_values.append(float(v))
-                                else:
-                                    numeric_values.append(int(v))
-                            
-                            # Calculate median value
-                            if numeric_values:
-                                numeric_values.sort()
-                                mid = len(numeric_values) // 2
-                                if len(numeric_values) % 2 == 0:
-                                    median = (numeric_values[mid-1] + numeric_values[mid]) / 2
-                                else:
-                                    median = numeric_values[mid]
-                                
-                                # Convert to int if it's a whole number
-                                if isinstance(median, float) and median.is_integer():
-                                    median = int(median)
-                                    
-                                template[field] = str(median)
-                            else:
-                                template[field] = default_median_values.get(field, "")
-                        except (ValueError, TypeError):
-                            # If values can't be converted to numbers, use most common
-                            value_counts = {}
-                            for v in values:
-                                value_counts[v] = value_counts.get(v, 0) + 1
-                            
-                            most_common = max(value_counts.items(), key=lambda x: x[1])[0]
-                            template[field] = str(most_common)
-                
-                # Set the Type field for this template
-                template["Type"] = obj_type
-                
-                # Ensure all fields in field_order are present
-                for field in field_order:
-                    if field not in template and field not in ["EntityIdx"]:
-                        if field in default_constant_values:
-                            template[field] = default_constant_values[field]
-                        elif field in default_median_values:
-                            template[field] = default_median_values[field]
-                        else:
-                            template[field] = ""
-                
-                templates[obj_type] = template
-            
-            # If no templates were created, create default templates
-            if not templates:
-                # Generate templates for all objective types (1-31)
-                for i in range(1, 32):
-                    template = {}
-                    obj_type = str(i)
-                    
-                    # Add all default constant values
-                    for field, value in default_constant_values.items():
-                        template[field] = value
-                    
-                    # Add all default median values
-                    for field, value in default_median_values.items():
-                        template[field] = value
-                    
-                    # Set the Type field
-                    template["Type"] = obj_type
-                    
-                    templates[obj_type] = template
-            
-            # Save templates to cache for future use
-            cache_dir = Path("data_components")
-            cache_dir.mkdir(exist_ok=True)
-            
-            with open(cache_dir / "comprehensive_ct_templates.json", "w") as f:
-                json.dump(templates, f, indent=2)
-            
-            logger.info(f"Created comprehensive CT templates for {len(templates)} objective types")
-            return templates
-            
-        except Exception as e:
-            logger.error(f"Error creating comprehensive CT templates: {e}")
-            return self._create_default_ct_templates()
-
     def _create_ocd_file(self, filepath, obj_num, ct_num, name, fields):
         """
         Create an OCD file with specified fields.
@@ -1714,7 +1802,7 @@ class BmsInjector:
             return True
             
         except Exception as e:
-            print(f"Error creating OCD file: {e}")
+            logger.error(f"Error creating OCD file: {e}")
             return False
 
     def _create_pd_file(self, filepath, root_tag, elem_tag):
@@ -1756,7 +1844,7 @@ class BmsInjector:
             return True
             
         except Exception as e:
-            print(f"Error creating PD file: {e}")
+            logger.error(f"Error creating PD file: {e}")
             return False
 
     def _create_fed_file(self, filepath):
@@ -1779,7 +1867,7 @@ class BmsInjector:
             return True
             
         except Exception as e:
-            print(f"Error creating FED file: {e}")
+            logger.error(f"Error creating FED file: {e}")
             return False
 
     def inject_features(self, obj_num, features, models_data, skip_backup=False):
@@ -1804,15 +1892,25 @@ class BmsInjector:
             logger.error(f"Objective directory or FED file does not exist: {obj_dir}")
             return False
         
-        # Backup objective files before modifying since it exists (if not skipped)
-        if not skip_backup:
+        # Backup objective files before modifying only if backups are enabled and not skipped
+        if self.backup and not skip_backup:
             self._backup_objective_files(obj_num)
+            
+        # Initialize tmp_dir and tmp_fed_file as None
+        tmp_dir = None
+        tmp_fed_file = None
         
-        # Create a temporary copy in the Generated folder 
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-        tmp_dir = self.generated_dir / f"OCD_{obj_num_str}-{timestamp}"
-        os.makedirs(tmp_dir, exist_ok=True)
-        tmp_fed_file = tmp_dir / f"FED_{obj_num_str}.XML"
+        # Only set up backup paths if backup_features is enabled
+        if self.backup_features:
+            # Define timestamp for backup paths
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            tmp_dir = self.generated_dir / f"OCD_{obj_num_str}-{timestamp}"
+            os.makedirs(tmp_dir, exist_ok=True)
+            tmp_fed_file = tmp_dir / f"FED_{obj_num_str}.XML"
+            logger.debug(f"Created backup directory for generated features: {tmp_dir}")
+        else:
+            # Skip all backup operations
+            logger.debug("Skipping all backup operations - backup_features disabled")
         
         try:
             # Parse existing FED file
@@ -1827,29 +1925,35 @@ class BmsInjector:
             for i, feature in enumerate(features):
                 self._add_fed_entry(root, i, feature, models_data)
             
-            # Write updated XML to both locations
+            # Write updated XML to the main FED file
             self._write_xml(tree, fed_file)
-            self._write_xml(tree, tmp_fed_file)
             
-            # Also save features to a text file for debugging
-            with open(tmp_dir / f"Features_{obj_num_str}.txt", "w") as f:
-                f.write(f"# Features for Objective {obj_num}\n\n")
-                for feature in features:
-                    f.write(f"{feature}\n")
+            # Only write to backup files if backup_features is enabled
+            if self.backup_features and tmp_dir is not None and tmp_fed_file is not None:
+                # Write to the backup FED file
+                self._write_xml(tree, tmp_fed_file)
+                
+                # Also save features to a text file for debugging
+                with open(tmp_dir / f"Features_{obj_num_str}.txt", "w") as f:
+                    f.write(f"# Features for Objective {obj_num}\n\n")
+                    for feature in features:
+                        f.write(f"{feature}\n")
+                logger.info(f"Created feature backups in {tmp_dir}")
                     
             return True
             
         except Exception as e:
             logger.error(f"Error injecting features: {e}")
-            # Try to save features to tmp file even if injection failed
-            try:
-                with open(tmp_dir / f"Features_{obj_num_str}_failed.txt", "w") as f:
-                    f.write(f"# Features that failed to inject for Objective {obj_num}\n\n")
-                    f.write(f"# Error: {str(e)}\n\n")
-                    for feature in features:
-                        f.write(f"{feature}\n")
-            except Exception:
-                pass
+            # Try to save features to tmp file even if injection failed, but only if backup_features is enabled
+            if self.backup_features and tmp_dir is not None:
+                try:
+                    with open(tmp_dir / f"Features_{obj_num_str}_failed.txt", "w") as f:
+                        f.write(f"# Features that failed to inject for Objective {obj_num}\n\n")
+                        f.write(f"# Error: {str(e)}\n\n")
+                        for feature in features:
+                            f.write(f"{feature}\n")
+                except Exception:
+                    pass
             return False
     
     def process_features_with_collision_detection(self, features, models_data):
@@ -2012,14 +2116,14 @@ class BmsInjector:
         # Find the row in models_data with this CT number
         model_rows = models_data[models_data["CTNumber"] == ct_number]
         if model_rows.empty:
-            print(f"Warning: No model data found for CT {ct_number}")
+            logger.warning(f"No model data found for CT {ct_number}")
             return
             
         # Get the model type for this feature (if available)
         model_type = None
         if not model_rows.empty and "Type" in model_rows.columns:
             model_type = int(model_rows.iloc[0]["Type"])
-            print(f"DEBUG: Model type for CT {ct_number} is {model_type}")
+            logger.debug(f"Model type for CT {ct_number} is {model_type}")
         
         # Create the FED element
         fed = ET.SubElement(root, "FED", Num=str(index))
@@ -2036,7 +2140,7 @@ class BmsInjector:
             # We need to extract the numeric value and remove any leading zeros
             try:
                 raw_value = parts[5]  # VALUE is at index 5
-                print(f"DEBUG: Raw value from feature entry for CT {ct_number}: '{raw_value}'")
+                logger.debug(f"Raw value from feature entry for CT {ct_number}: '{raw_value}'")
 
                 numeric_value = int(raw_value)  # Convert to int to remove any formatting
                 
@@ -2045,7 +2149,7 @@ class BmsInjector:
                 logger.info(f"Added Value={numeric_value} to FED entry for CT {ct_number}")
                 
                 # Additional debug output with full feature entry for diagnostics
-                print(f"Full feature entry for CT {ct_number}: {feature_entry}")
+                logger.debug(f"Full feature entry for CT {ct_number}: {feature_entry}")
             except (ValueError, IndexError) as e:
                 # No default values - raise an error
                 error_msg = f"Invalid value format in feature entry for CT {ct_number}: {e}"
@@ -2328,7 +2432,6 @@ class BmsInjector:
                     
                     # Log warning for failed placements
                     failure_msg = f"WARNING: Feature {feature_idx} (CT {feature['ct_num']}) placed with COLLISION at ({x:.2f}, {y:.2f}) after {attempts} failed attempts - overlap score: {best_overlap_score:.2f}"
-                    print(failure_msg)  # Print to console
                     logger.warning(failure_msg)  # Log as warning
             
             # Construct the updated feature string with new coordinates
@@ -2512,7 +2615,7 @@ class BmsInjector:
         try:
             obj_type = int(obj_type)  # Ensure obj_type is always an integer
             logger.info(f"Creating objective {obj_num} with type {obj_type}")
-            print(f"DEBUG: BmsInjector creating objective {obj_num} with type {obj_type}")
+            logger.debug(f"BmsInjector creating objective {obj_num} with type {obj_type}")
         except (ValueError, TypeError):
             logger.error(f"Invalid objective type: {obj_type}, must be a number")
             return False
@@ -2524,21 +2627,32 @@ class BmsInjector:
         obj_dir = self.objective_dir / f"OCD_{obj_num_str}"
         creating = not obj_dir.exists()
         
-        # Create a backup of the CT file (only once)
-        self._backup_ct_file()
-        
-        # If updating an existing objective, backup its files first (only once)
-        if not creating:
-            self._backup_objective_files(obj_num)
+        # Only create backups if the backup setting is enabled
+        if self.backup:
+            # Create a backup of the CT file (only once)
+            self._backup_ct_file()
+            
+            # If updating an existing objective, backup its files first (only once)
+            if not creating:
+                self._backup_objective_files(obj_num)
+        else:
+            logger.debug(f"Skipping backups due to disabled backup setting")
+
         
         # First create the objective without backing up again (passing backup=False)
         # We need to reimplement the core functionality without calling create_objective
         # to avoid the duplicate backup of the CT file
-        
-        # Create a temporary copy in the Generated folder
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-        tmp_dir = self.generated_dir / f"OCD_{obj_num_str}-{timestamp}"
-        os.makedirs(tmp_dir, exist_ok=True)
+        # Only set up backup paths if backup_features is enabled
+        if self.backup_features:
+            # Define timestamp for backup paths
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            tmp_dir = self.generated_dir / f"OCD_{obj_num_str}-{timestamp}"
+            os.makedirs(tmp_dir, exist_ok=True)
+            logger.debug(f"Created backup directory for generated features: {tmp_dir}")
+        else:
+            # Skip all backup operations
+            tmp_dir = None
+            logger.debug("Skipping all backup operations - backup_features disabled")
         
         # Create objective directory if needed
         os.makedirs(obj_dir, exist_ok=True)
@@ -2562,9 +2676,11 @@ class BmsInjector:
         
         # Create OCD file and its temp copy
         ocd_file = obj_dir / f"OCD_{obj_num_str}.XML"
-        tmp_ocd_file = tmp_dir / f"OCD_{obj_num_str}.XML"
         success = self._create_ocd_file(ocd_file, obj_num, ct_num, name, combined_fields)
-        self._create_ocd_file(tmp_ocd_file, obj_num, ct_num, name, combined_fields)
+        # Create a copy in the Generated folder if backup_features is enabled
+        if self.backup_features and tmp_dir is not None:
+            tmp_ocd_file = tmp_dir / f"OCD_{obj_num_str}.XML"
+            self._create_ocd_file(tmp_ocd_file, obj_num, ct_num, name, combined_fields)
         
         if not success:
             logger.error(f"Failed to create OCD file for objective {obj_num}")
@@ -2574,19 +2690,23 @@ class BmsInjector:
         if creating or reset_pd:
             pdx_file = obj_dir / f"PDX_{obj_num_str}.XML"
             phd_file = obj_dir / f"PHD_{obj_num_str}.XML"
-            tmp_pdx_file = tmp_dir / f"PDX_{obj_num_str}.XML"
-            tmp_phd_file = tmp_dir / f"PHD_{obj_num_str}.XML"
             
             self._create_pd_file(pdx_file, "PDXRecords", "PD")
             self._create_pd_file(phd_file, "PHDRecords", "PHD")
-            self._create_pd_file(tmp_pdx_file, "PDXRecords", "PD")
-            self._create_pd_file(tmp_phd_file, "PHDRecords", "PHD")
+            # Create copies in the Generated folder if backup_features is enabled
+            if self.backup_features and tmp_dir is not None:
+                tmp_pdx_file = tmp_dir / f"PDX_{obj_num_str}.XML"
+                tmp_phd_file = tmp_dir / f"PHD_{obj_num_str}.XML"
+                self._create_pd_file(tmp_pdx_file, "PDXRecords", "PD")
+                self._create_pd_file(tmp_phd_file, "PHDRecords", "PHD")
         
         # Create empty FED file ready for injection
         fed_file = obj_dir / f"FED_{obj_num_str}.XML"
-        tmp_fed_file = tmp_dir / f"FED_{obj_num_str}.XML"
         self._create_fed_file(fed_file)
-        self._create_fed_file(tmp_fed_file)
+        # Create a copy in the Generated folder if backup_features is enabled
+        if self.backup_features and tmp_dir is not None:
+            tmp_fed_file = tmp_dir / f"FED_{obj_num_str}.XML"
+            self._create_fed_file(tmp_fed_file)
         
         # Update CT file with objective data, but don't create another backup
         # Pass obj_num to properly set the EntityIdx in the CT file
@@ -2640,14 +2760,20 @@ class BmsInjector:
                 self._add_fed_entry(root, i, feature, models_data)
             
             # Write updated XML to both locations
+            # Write updated XML to the main FED file
             self._write_xml(tree, fed_file)
-            self._write_xml(tree, tmp_fed_file)
-            
-            # Also save features to a text file for debugging
-            with open(tmp_dir / f"Features_{obj_num_str}.txt", "w") as f:
-                f.write(f"# Features for Objective {obj_num}\n\n")
-                for feature in processed_features:
-                    f.write(f"{feature}\n")
+            # Also write to the Generated folder and save debug info if backup_features is enabled
+            if self.backup_features and tmp_dir is not None:
+                self._write_xml(tree, tmp_fed_file)
+                
+                # Also save features to a text file for debugging
+                with open(tmp_dir / f"Features_{obj_num_str}.txt", "w") as f:
+                    f.write(f"# Features for Objective {obj_num}\n\n")
+                    for feature in processed_features:
+                        f.write(f"{feature}\n")
+                logger.info(f"Backed up features to {tmp_dir}")
+            else:
+                logger.debug("Skipping feature backup due to disabled backup_features setting")
                     
             return True
         except Exception as e:
@@ -2660,10 +2786,10 @@ if __name__ == "__main__":
     injector = BmsInjector(bms_path)
     
     # Test if CT is objective
-    print(f"Is CT 9 an objective: {injector.is_objective_ct(9)}")
+    logger.info(f"Is CT 9 an objective: {injector.is_objective_ct(9)}")
     
     # Test if objective exists
-    print(f"Does objective 1 exist: {injector.objective_exists(1)}")
+    logger.info(f"Does objective 1 exist: {injector.objective_exists(1)}")
     
     # Print templates
-    print(f"Objective templates: {len(injector.objective_templates)}") 
+    logger.info(f"Objective templates: {len(injector.objective_templates)}")

@@ -1,0 +1,156 @@
+┌───────────────────────────────────────────────────────┐
+│                      CORE FILES                       │
+└───────────────────────────────────────────────────────┘
+┌─ MainGui.py ───────────-──┐      ┌─ MainCode.py ───────────┐
+│ Main Application Interface│      │ Core Logic              │
+│ - MainPage class          │◄────►│ - Load_Db               │
+│   - Auto_Load integration │      │ - Assign_features_*     │
+│ - DashboardPage           │      │ - Save_*_features       │
+│ - DatabasePage            │      │ - Decision_Algo         │
+│ - GeoDataPage             │      │ - Show_Selected_Features│
+│ - OperationPage           │      │ - startup_selection     │
+│ - SettingsPage            │◄────►│                         │
+└───────────┬───────────────┘      └───────────┬─────────────┘
+            │                                  │
+            │                                  │
+            ▼                                  ▼
+┌─ bms_injector.py ────────┐      ┌─ Database.py ───────────┐
+│ BMS Integration          │      │ Database Management     │
+│ - BmsInjector class      │      │ - GenerateDB            │
+│ - XML feature injection  │◄────►│ - SQLite integration    │
+│ - <Value> field support  │      │ - Model data access     │
+└───────────────────────┬──┘      └───────────┬─────────────┘
+                        │                     │
+                        │                     │
+┌───────────────────────┴─────────────────────┴───────-──────┐
+│                     SUPPORT FILES                          │
+└───────────────────────────────────────────────────────────┬┘
+                                                            │
+┌─ processing_window.py ─┐  ┌─ Load_Geo_File.py ─┐  ┌─ Find_features.py ─┐
+│ Processing UI          │  │ GeoJSON Processing │  │ Feature extraction │
+│ - ProcessingWindow     │  │ - Geo data loading │  │ - Includes boundary│
+│ - run_with_processing  │  │ - Coordinate       │  │   calculations     │
+└─────────────────────┬──┘  │   conversion       │  └────────┬───────────┘
+                      │     └──────────┬─────────┘           │
+                      │                │                     │
+┌─────────────────────┴────────────────┴─────────┐    ┌──────┴───────────────-┐
+│               UTILITY MODULES                  │    │ MinimumBoundingBox.py │
+└───────────────────────────────────────────────┬┘    │ Calculates min box    │
+                                                │     │ boundaries for shapes │
+┌─ OSMLegend.py ─────────┐ ┌─ ValuesDictionary.py -┐  └─────────────────────-─┘
+│ OpenStreetMap Legend   │ │ Value Configuration   │
+│ - OSM tag processing   │ │ - Feature value lookup│
+└──────────┬─────────────┘ └────────┬────────────-─┘
+           │                        │
+┌──────────┴────────────┐ ┌─────────┴────────────┐
+│ Restrictions.py       │ │ InternalConsole.py   │
+│ - Feature restrictions│ │ - Debug console      │
+└───────────────────────┘ └──────────────────────┘
+                                                             
+┌─────────────────────────────────────────────────────┐     
+│               COMPONENT MODULES                     │     
+└─────────────────────────────────────────────────────┤     
+┌─ components/ ───────────────────────────────────────┐     
+│                                                     │     
+│  ┌─ settings_window.py ─────┐                       │     
+│  │ Enhanced Settings UI     │                       │     
+│  │ - SettingsWindow class   │◄─── Used by MainGui.py│     
+│  │ - _toggle_auto_start     │                       │     
+│  │ - Tabbed interface       │                       │     
+│  └─────────────┬────────────┘                       │     
+│                │                                    │     
+│  ┌─ bms_injection_window.py ─┐                      │     
+│  │ BMS Injection UI          │                      │     
+│  │ - BmsInjectionWindow class│                      │     
+│  │ - Enhanced injection UI   │                      │     
+│  └────────────┬──────────────┘                      │     
+│               │                                     │     
+│  ┌─ ct_data_handler.py ────┐                        │     
+│  │ Class Table Data Handler │                       │     
+│  │ - CTDataHandler class    │◄─── Used by settings_window.py │
+│  │ - load_ct_types          │                       │     
+│  │ - get_ct_template        │                       │     
+│  │ - save_ct_template       │                       │     
+│  └─────────────┬────────────┘                       │     
+│               │                                     │     
+│  ┌─ internal_console.py ──┐                         │     
+│  │ Enhanced Internal Console│                       │     
+│  │ - InternalConsoleWindow │◄─── Enhanced version   │     
+│  │ - Debug functionality   │                        │     
+│  └─────────────┬───────────┘                        │     
+│               │                                     │     
+│  ┌────────────┴───────────────┐                     │     
+│  │ objective_cache.py         │                     │     
+│  │ - BMS objective caching    │                     │     
+│  │ - Cache management         │                     │     
+│  └────────────────────────────┘                     │     
+│                                                     │     
+│  ┌─ overwrite_dialog.py ─┐                          │     
+│  │ File overwrite UI     │  ◄─── Used by utils/file_manager.py │
+│  │ - OverwriteDialog     │                          │     
+│  └───────────────────────┘                          │     
+│                                                     │     
+└─────────────────────────────────────────────────────┘     
+
+┌───────────────────────────────────────────────────────┐      
+│                   UTILITY LIBRARIES                   │      
+└───────────────────────────────────────────────────────┤      
+┌─ utils/ ────────────────────────────────────────────┐ │        
+│                                                     │ │        
+│  ┌─ file_manager.py ─┐  ┌─ json_path_handler.py┐    │ │        
+│  │ File operations   │  │ JSON handling        │    │ │        
+│  │ - FileManager     │  │ - load_json          │    │ │        
+│  │ - File backup     │  │ - save_json          │    │ │        
+│  │ - Overwrite mgmt  │  │ - Path utilities     │    │ │        
+│  └───────────────────┘  └──────────────────────┘    │ │        
+│                                                     │ │        
+│  ┌─ config.py ──────┐   ┌─ logger.py ──────────┐    │ │        
+│  │ Configuration    │   │ Logging functionality│    │ │        
+│  │ - WINDOW_SIZE    │   │ - Error handling     │    │ │        
+│  │ - App settings   │   │ - Debug logging      │    │ │ 
+│  └──────────────────┘   └──────────────────────┘    │ │
+│─────────────────────────────────────────────────────┘ │
+└───────────────────────────────────────────────────────┘         
+
+┌──────────────────────────────────────────────────────────────────┐     
+│                          DATA FILES                              │
+└──────────────────────────────────────────────────────────────────┤     
+│ ┌─ data_components/ ───────────────────────────────────────────┐ │     
+│ │                                                              │ │     
+│ │ ┌─ Template Files ─────────────────────────────┐             │ │     
+│ │ │ - objective_templates.json: Objective definitions          │ │     
+│ │ │ - ct_templates.json: Class Table templates                 │ │        
+│ │ │ - comprehensive_ct_templates.json: Complete CT data        │ │        
+│ │ └──────────────────────────────────────────────┘             │ │     
+│ │                                                              │ │     
+│ │ ┌─ Cache & Settings ──────────────────────────┐              │ │     
+│ │ │ - objective_cache.json: BMS objective cache                │ │         
+│ │ │ - saved_objective_settings.json: User settings             │ │         
+│ │ │ - ValuesDic.json: Feature value dictionary                 │ │         
+│ │ │ - feature_statistics.json.gz: Statistics data              │ │        
+│ │ │ - restrictions_profiles.json: Restriction profiles         │ │        
+│ │ │ - config.json: Data component configuration                │ │          
+│ │ └─────────────────────────────────────────────┘              │ │     
+│ │                                                              │ │     
+│ └──────────────────────────────────────────────────────────────┘ │     
+│                                                                  │     
+│ ┌─ config.json (root) ──────────────────────────────┐            │     
+│ │ Main application settings including Auto-Start configuration   │     
+│ └──────────────────────────────────────────────────┘             │
+└──────────────────────────────────────────────────────────────────┘     
+
+┌──────────────────────────────────────────────────────┐     
+│                 ASSET DIRECTORIES                    │     
+└──────────────────────────────────────────────────────┤     
+│ ┌─ Assets/ ───────────┐ ┌─ Generated/ ──────────────┐│     
+│ │ UI assets and icons │ │ Generated output files    ││     
+│ └─────────────────────┘ └───────────────────────────┘│     
+│ ┌─ Database/ ─────────┐ ┌─ Backupfiles/ ────────────┐│     
+│ │ Database files      │ │ Backup of modified files  ││     
+│ └─────────────────────┘ └───────────────────────────┘│     
+│ ┌─ docs/ ─────────────┐ ┌─ logs/ ───────────────────┐│     
+│ │ Documentation files │ │ Application logs          ││     
+│ │ - Developer guides  │ │ - building_generator.log  ││     
+│ │ - User documentation│ └───────────────────────────┘│     
+│ └─────────────────────┘                              │     
+└──────────────────────────────────────────────────────┘

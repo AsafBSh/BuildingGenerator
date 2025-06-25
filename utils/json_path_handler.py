@@ -33,6 +33,9 @@ class JsonFiles:
     
     # Configuration files
     CONFIG_JSON = "config.json"
+    
+    # Restrictions profiles
+    RESTRICTIONS_PROFILES = "restrictions_profiles.json"
 
 def ensure_data_dir() -> Path:
     """
@@ -128,3 +131,48 @@ def save_json(filename: str, data: Union[Dict, list], indent: int = 2) -> bool:
     except Exception as e:
         logger.error(f"Error saving JSON data to {file_path}: {e}")
         return False
+
+def load_or_create_restrictions_profiles() -> Dict:
+    """
+    Load restrictions profiles from file, or create a default file with empty entry if it doesn't exist.
+    
+    Returns:
+        Dict: The restrictions profiles data with at least an empty entry
+    """
+    try:
+        # Try to load existing file
+        profiles_data = load_json(JsonFiles.RESTRICTIONS_PROFILES)
+        
+        # If file doesn't exist or is empty, create default structure
+        if not profiles_data:
+            profiles_data = {
+                "": {
+                    "checkboxes": [],
+                    "textbox": ""
+                }
+            }
+            # Save the default structure
+            save_json(JsonFiles.RESTRICTIONS_PROFILES, profiles_data)
+            logger.info("Created default restrictions profiles file with empty entry")
+        
+        # Ensure empty entry exists
+        if "" not in profiles_data:
+            profiles_data[""] = {
+                "checkboxes": [],
+                "textbox": ""
+            }
+            save_json(JsonFiles.RESTRICTIONS_PROFILES, profiles_data)
+            logger.info("Added empty entry to restrictions profiles")
+        
+        return profiles_data
+        
+    except Exception as e:
+        logger.error(f"Error loading/creating restrictions profiles: {e}")
+        # Return default structure on error
+        default_profiles = {
+            "": {
+                "checkboxes": [],
+                "textbox": ""
+            }
+        }
+        return default_profiles
