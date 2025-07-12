@@ -6,6 +6,7 @@ from PIL import Image
 
 # General libraries
 import os
+import sys
 import json
 import gzip
 import winreg
@@ -84,7 +85,7 @@ class MainPage(tk.Tk):
         self.shared_data["backup_CTpath"].set("No CT file selected")
         self.shared_data["Geopath"].set("No GeoJson file selected")
         self.shared_data["log_level"].set("INFO")  # Default log level
-        self.shared_data["logging_method"].set("Console") # Default logging_method
+        self.shared_data["logging_method"].set("None") # Default logging_method (disabled as per user specification)
         
         # Initialize Auto_Load attribute for settings window integration
         self.Auto_Load = tk.BooleanVar(value=False)
@@ -100,7 +101,7 @@ class MainPage(tk.Tk):
             frame.grid(row=0, column=0, sticky="nsew")
 
         # Set Name and Icon and version
-        self.shared_data["BuildingGeneratorVer"].set("Building Generator v1.5")
+        self.shared_data["BuildingGeneratorVer"].set("Building Generator v1.6")
         self.title(self.shared_data["BuildingGeneratorVer"].get())
         self.iconbitmap("Assets/icon_128.ico")
 
@@ -118,54 +119,128 @@ class MainPage(tk.Tk):
         frame.grid()
         
     def _configure_application_logging(self):
-        """Configure the application-wide logging system.
+        """Configure the application-wide logging system with PyInstaller compatibility.
         
-        This method sets up proper logging for the entire application, replacing
-        the old debugger toggle with a comprehensive logging system that supports
-        different log levels and multiple output destinations.
+        This method sets up proper logging for the entire application with special
+        handling for compiled executables to ensure logs are always accessible.
         """
-        # Create logs directory if it doesn't exist
-        logs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
-        os.makedirs(logs_dir, exist_ok=True)
-        
-        # Configure the root logger to affect all loggers in the application
-        root_logger = logging.getLogger()
-        root_logger.setLevel(logging.INFO)  # Default level
-        
-        # Remove any existing handlers to avoid duplicates
-        for handler in root_logger.handlers[:]:
-            root_logger.removeHandler(handler)
+        try:
+            # Detect if running as compiled executable
+            is_compiled = getattr(sys, 'frozen', False)
             
-        # Create formatter for consistent log messages
-        formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        )
-        
-        # Add console handler
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
-        console_handler.setLevel(logging.INFO)
-        root_logger.addHandler(console_handler)
-        
-        # Add file handler for persistent logs
-        file_handler = logging.FileHandler(
-            os.path.join(logs_dir, "building_generator.log")
-        )
-        file_handler.setFormatter(formatter)
-        file_handler.setLevel(logging.INFO)
-        root_logger.addHandler(file_handler)
-        
-        # Configure all imported modules to use this logger configuration
-        for name in ['Load_Geo_File', 'objective_cache', 'Database', 'MainCode', 'OSMLegend', 'ValuesDictionary']:
-            module_logger = logging.getLogger(name)
-            module_logger.setLevel(logging.INFO)
-            # Module loggers inherit handlers from the root logger, so no need to add handlers
-        
-        # Log application startup
-        logger = logging.getLogger(__name__)
-        logger.info("Building Generator application starting")
-        logger.info(f"Log directory: {logs_dir}")
+            # Determine the base directory for the application
+            if is_compiled:
+                # For compiled executables, use the directory containing the executable
+                if hasattr(sys, '_MEIPASS'):
+                    # PyInstaller temp directory
+                    base_dir = os.path.dirname(sys.executable)
+                else:
+                    base_dir = os.path.dirname(sys.executable)
+            else:
+                # For normal Python scripts
+                base_dir = os.path.dirname(os.path.abspath(__file__))
+            
+            # Create logs directory - try multiple locations for compiled executables
+            logs_dir = None
+            possible_log_dirs = [
+                os.path.join(base_dir, "logs"),
+                os.path.join(os.getcwd(), "logs"),
+                os.path.join(os.path.expanduser("~"), "Building_Generator_Logs"),
+            ]
+            
+            for log_dir in possible_log_dirs:
+                try:
+                    os.makedirs(log_dir, exist_ok=True)
+                    # Test write permissions
+                    test_file = os.path.join(log_dir, "test_write.tmp")
+                    with open(test_file, 'w') as f:
+                        f.write("test")
+                    os.remove(test_file)
+                    logs_dir = log_dir
+                    break
+                except (OSError, PermissionError):
+                    continue
+            
+            # If no writable directory found, use temp directory as last resort
+            if logs_dir is None:
+                import tempfile
+                logs_dir = tempfile.gettempdir()
+            
+            # Configure the root logger
+            root_logger = logging.getLogger()
+            root_logger.setLevel(logging.INFO)
+            
+            # Remove any existing handlers to avoid duplicates
+            for handler in root_logger.handlers[:]:
+                root_logger.removeHandler(handler)
+            
+            # Create formatter for consistent log messages
+            formatter = logging.Formatter(
+                '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S'
+            )
+            
+            # For compiled executables, always create an emergency log file
+            if is_compiled:
+                try:
+                    emergency_log = os.path.join(logs_dir, "building_generator_emergency.log")
+                    emergency_handler = logging.FileHandler(emergency_log, mode='w')
+                    emergency_handler.setLevel(logging.DEBUG)
+                    emergency_handler.setFormatter(formatter)
+                    root_logger.addHandler(emergency_handler)
+                    
+                    # Log startup information immediately
+                    root_logger.critical(f"=== COMPILED EXECUTABLE STARTUP ===")
+                    root_logger.critical(f"Executable path: {sys.executable}")
+                    root_logger.critical(f"Working directory: {os.getcwd()}")
+                    root_logger.critical(f"Base directory: {base_dir}")
+                    root_logger.critical(f"Logs directory: {logs_dir}")
+                    root_logger.critical(f"Emergency log: {emergency_log}")
+                    root_logger.critical("=== END STARTUP INFO ===")
+                except Exception as e:
+                    # If even emergency logging fails, create a fallback file
+                    try:
+                        fallback_log = os.path.join(os.path.expanduser("~"), "building_generator_fallback.log")
+                        with open(fallback_log, 'w') as f:
+                            f.write(f"CRITICAL ERROR: Cannot set up logging system\n")
+                            f.write(f"Error: {str(e)}\n")
+                            f.write(f"Executable: {sys.executable}\n")
+                            f.write(f"Working dir: {os.getcwd()}\n")
+                    except:
+                        pass  # If all else fails, continue without logging
+            else:
+                # For normal execution, add a NullHandler by default
+                null_handler = logging.NullHandler()
+                root_logger.addHandler(null_handler)
+            
+            # Store the logs directory for later use
+            self.logs_dir = logs_dir
+            
+            # Configure all imported modules to use this logger configuration
+            for name in ['Load_Geo_File', 'objective_cache', 'Database', 'MainCode', 'OSMLegend', 'ValuesDictionary']:
+                module_logger = logging.getLogger(name)
+                module_logger.setLevel(logging.INFO)
+            
+            # Log successful initialization
+            if is_compiled:
+                root_logger.info("Logging system initialized for compiled executable")
+            else:
+                root_logger.debug("Logging system initialized for Python script")
+                
+        except Exception as e:
+            # Emergency fallback - write to a file in user's home directory
+            try:
+                emergency_file = os.path.join(os.path.expanduser("~"), "building_generator_critical_error.log")
+                with open(emergency_file, 'w') as f:
+                    f.write(f"CRITICAL: Failed to initialize logging system\n")
+                    f.write(f"Error: {str(e)}\n")
+                    f.write(f"Python path: {sys.executable}\n")
+                    f.write(f"Working directory: {os.getcwd()}\n")
+                    f.write(f"Frozen: {getattr(sys, 'frozen', False)}\n")
+                    import traceback
+                    f.write(f"Traceback:\n{traceback.format_exc()}\n")
+            except:
+                pass  # If even this fails, continue without logging
 
     def SelectCTfile(self, event):
         """Open a file dialog to select a CT XML file and update the application state.
@@ -276,6 +351,11 @@ class MainPage(tk.Tk):
         if handlers is None:
             handlers = ['console']
             
+        # Validate and normalize the log level
+        valid_levels = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
+        if level not in valid_levels:
+            level = 'INFO'  # Default to INFO if invalid level provided
+            
         # Update the log level in shared data for other components to access
         self.shared_data["log_level"].set(level)
         
@@ -294,7 +374,7 @@ class MainPage(tk.Tk):
             datefmt='%Y-%m-%d %H:%M:%S'
         )
         
-        # Add requested handlers
+        # Add requested handlers or NullHandler if none requested
         if 'console' in handlers:
             console_handler = logging.StreamHandler()
             console_handler.setLevel(numeric_level)
@@ -302,16 +382,45 @@ class MainPage(tk.Tk):
             root_logger.addHandler(console_handler)
             
         if 'file' in handlers:
-            # Ensure logs directory exists
-            logs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
-            os.makedirs(logs_dir, exist_ok=True)
+            # Use the logs directory determined during initialization
+            logs_dir = getattr(self, 'logs_dir', None)
+            if logs_dir is None:
+                # Fallback if logs_dir wasn't set during initialization
+                is_compiled = getattr(sys, 'frozen', False)
+                if is_compiled:
+                    logs_dir = os.path.dirname(sys.executable)
+                else:
+                    logs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+                os.makedirs(logs_dir, exist_ok=True)
             
-            # Create file handler
-            log_file = os.path.join(logs_dir, "building_generator.log")
-            file_handler = logging.FileHandler(log_file)
-            file_handler.setLevel(numeric_level)
-            file_handler.setFormatter(formatter)
-            root_logger.addHandler(file_handler)
+            # Create file handler with error handling
+            try:
+                log_file = os.path.join(logs_dir, "building_generator.log")
+                file_handler = logging.FileHandler(log_file)
+                file_handler.setLevel(numeric_level)
+                file_handler.setFormatter(formatter)
+                root_logger.addHandler(file_handler)
+            except (OSError, PermissionError) as e:
+                # If main log file fails, try alternative locations
+                fallback_locations = [
+                    os.path.join(os.getcwd(), "building_generator.log"),
+                    os.path.join(os.path.expanduser("~"), "building_generator.log"),
+                ]
+                for fallback_log in fallback_locations:
+                    try:
+                        file_handler = logging.FileHandler(fallback_log)
+                        file_handler.setLevel(numeric_level)
+                        file_handler.setFormatter(formatter)
+                        root_logger.addHandler(file_handler)
+                        logging.warning(f"Using fallback log location: {fallback_log}")
+                        break
+                    except (OSError, PermissionError):
+                        continue
+            
+        # If no real handlers were added, add NullHandler to prevent automatic StreamHandler creation
+        if not handlers or len(handlers) == 0:
+            null_handler = logging.NullHandler()
+            root_logger.addHandler(null_handler)
         
         # Update levels for known module loggers as well
         for name in ['Load_Geo_File', 'objective_cache', 'Database', 'MainCode', 'OSMLegend', 'ValuesDictionary']:
@@ -321,6 +430,12 @@ class MainPage(tk.Tk):
         # Log the configuration change
         logger = logging.getLogger(__name__)
         logger.info(f"Logging configuration updated: level={level}, handlers={handlers}")
+        
+        # Test message to verify logging is working (only when handlers are configured)
+        if handlers:
+            logger.debug("Debug logging test - settings applied successfully")
+            logger.info("Info logging test - configuration active")
+            logger.warning("Warning logging test - all levels functional")
 
     def open_console_window(self):
         """Opens a new console window or brings existing one to front"""
@@ -483,14 +598,19 @@ class MainPage(tk.Tk):
             self.shared_data['backup_bms_files'] = loaded_data.get('backup_bms_files', '0') # Default to '0' (False)
             self.shared_data['backup_features_files'] = loaded_data.get('backup_features_files', '0') # Default to '0' (False)
             
-            # Load and apply logging configuration
-            log_level = loaded_data.get("log_level", "None")
-            logging_method = loaded_data.get("logging_method", "Console")
+            # Load and apply logging configuration using settings_window.py mapping approach
+            log_level = loaded_data.get("log_level", "INFO")
+            logging_method = loaded_data.get("logging_method", "None")  # Default to None (disabled)
+            
+            # Validate log level
+            valid_levels = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
+            if log_level not in valid_levels:
+                log_level = 'INFO'  # Default to INFO if invalid level
             
             self.shared_data["log_level"].set(log_level)
             self.shared_data["logging_method"].set(logging_method)
             
-            # Convert logging_method to handlers list and apply
+            # Convert logging_method to handlers list using the same mapping as settings_window.py
             handlers = []
             if logging_method == "Console":
                 handlers = ['console']
@@ -499,15 +619,25 @@ class MainPage(tk.Tk):
             elif logging_method == "Both":
                 handlers = ['console', 'file']
             elif logging_method == "None":
-                handlers = []
+                handlers = []  # No logging
             else:
-                handlers = ['console']  # Default fallback
+                # Invalid value, default to None (disabled) as per user specification
+                handlers = []
+                logging_method = "None"
+                self.shared_data["logging_method"].set("None")
             
-            # Apply the logging configuration
-            if handlers:  # Only apply if we have handlers
+            # Apply the logging configuration - only if handlers are specified
+            if handlers:
                 self.update_logging_config(level=log_level, handlers=handlers)
                 logging.info(f"Applied loaded logging configuration: level={log_level}, method={logging_method}")
             else:
+                # Disable logging by removing all handlers and adding NullHandler
+                root_logger = logging.getLogger()
+                for handler in root_logger.handlers[:]:
+                    root_logger.removeHandler(handler)
+                # Add NullHandler to prevent automatic StreamHandler creation
+                null_handler = logging.NullHandler()
+                root_logger.addHandler(null_handler)
                 logging.info("Logging disabled by loaded configuration")
             
             # Set dropdown and segmented button values
@@ -658,15 +788,20 @@ class MainPage(tk.Tk):
             # Update Auto_Load to match the Startup value from config
             self.Auto_Load.set(startup_value == "1")
             
-            # Apply logging configuration from config file regardless of auto-start setting
-            log_level = config_data.get("log_level", "None")
-            logging_method = config_data.get("logging_method", "Console")
+            # Apply logging configuration from config file using settings_window.py mapping approach
+            log_level = config_data.get("log_level", "INFO")
+            logging_method = config_data.get("logging_method", "None")  # Default to None (disabled)
+            
+            # Validate log level
+            valid_levels = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
+            if log_level not in valid_levels:
+                log_level = 'INFO'  # Default to INFO if invalid level
             
             # Update shared data with logging settings
             self.shared_data["log_level"].set(log_level)
             self.shared_data["logging_method"].set(logging_method)
             
-            # Convert logging_method to handlers list for update_logging_config
+            # Convert logging_method to handlers list using the same mapping as settings_window.py
             handlers = []
             if logging_method == "Console":
                 handlers = ['console']
@@ -675,15 +810,25 @@ class MainPage(tk.Tk):
             elif logging_method == "Both":
                 handlers = ['console', 'file']
             elif logging_method == "None":
-                handlers = []
+                handlers = []  # No logging
             else:
-                handlers = ['console']  # Default fallback
+                # Invalid value, default to None (disabled) as per user specification
+                handlers = []
+                logging_method = "None"
+                self.shared_data["logging_method"].set("None")
             
-            # Apply the logging configuration
-            if handlers:  # Only apply if we have handlers
+            # Apply the logging configuration - only if handlers are specified
+            if handlers:
                 self.update_logging_config(level=log_level, handlers=handlers)
                 logging.info(f"Applied logging configuration from config: level={log_level}, method={logging_method}")
             else:
+                # Disable logging by removing all handlers and adding NullHandler
+                root_logger = logging.getLogger()
+                for handler in root_logger.handlers[:]:
+                    root_logger.removeHandler(handler)
+                # Add NullHandler to prevent automatic StreamHandler creation
+                null_handler = logging.NullHandler()
+                root_logger.addHandler(null_handler)
                 logging.info("Logging disabled by configuration")
             
             # Only load full config if Startup is '1'
@@ -2987,7 +3132,8 @@ class GeoDataPage(tk.Frame):
         except Exception as e:
             import traceback
             error_details = traceback.format_exc()
-            logging.getLogger(__name__).error(f"Unexpected error during GeoJSON loading: {error_details}")
+            logger.error(f"Unexpected error during GeoJSON loading: {str(e)}")
+            logger.debug(f"Full error traceback: {error_details}")
             
             # Provide a more user-friendly error message
             error_msg = "Failed to load GeoJSON data"
@@ -2995,12 +3141,25 @@ class GeoDataPage(tk.Frame):
             # Check specific error types to give more helpful messages
             if "TypeError: cannot unpack" in str(e):
                 error_msg = "Processing error: Could not parse GeoJSON data structure. Check the file format."
+                logger.error("GeoJSON data structure parsing failed - invalid return format")
             elif "ValueError: Projection string" in str(e):
                 error_msg = "Invalid projection string or GeoJSON path."
+                logger.error("Invalid projection string or GeoJSON path provided")
             elif "FileNotFoundError" in error_details:
                 error_msg = "GeoJSON file not found. Check the file path."
+                logger.error("GeoJSON file not found at specified path")
+            elif "PermissionError" in error_details:
+                error_msg = "Cannot read GeoJSON file. Check file permissions."
+                logger.error("Permission denied when trying to read GeoJSON file")
+            elif "geopandas" in str(e).lower():
+                error_msg = "GeoJSON file format error. The file may be corrupted or not a valid GeoJSON."
+                logger.error("Geopandas failed to read the file - likely format issue")
             else:
                 error_msg = f"{error_msg}: {str(e)}"
+                logger.error(f"Unhandled error type: {type(e).__name__}")
+                
+            # Log the error for debugging
+            logger.critical(f"GeoJSON loading failed completely. Error: {error_msg}")
                 
             # Show error message to user
             messagebox.showerror("Error", error_msg)
