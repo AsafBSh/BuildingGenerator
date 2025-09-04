@@ -530,6 +530,18 @@ def Load_Geo_File(
                         continue
                         
                     Real_center, rotation_angle, side_lengths = fitted_features(coordinates[0])
+                    # Prepare footprint relative coordinates in feet for drawing later
+                    try:
+                        # Choose the polygon ring with the most vertices as the primary footprint
+                        primary_coords = max(coordinates, key=lambda arr: len(arr) if arr is not None else 0)
+                        primary_coords = np.array(primary_coords, dtype=float)
+                        # Convert to feet (consistent with center_list conversion below)
+                        coords_feet = primary_coords * meter2feet_BMS
+                        center_feet = np.array(Real_center, dtype=float) * meter2feet_BMS
+                        footprint_rel = coords_feet - center_feet  # Nx2 relative to its own center
+                    except Exception as e:
+                        logger.warning(f"Failed computing relative footprint for feature {index}: {e}")
+                        footprint_rel = None
                     # add to center list for later average center calculation
                     center_list.append(Real_center)
                 except Exception as e:
@@ -584,6 +596,8 @@ def Load_Geo_File(
                     "sport": sport,
                     "tower": tower,
                 }
+                # Append footprint at the end to preserve original column order expected by UI
+                feature_data["footprint_rel"] = footprint_rel.tolist() if footprint_rel is not None else None
                 feature_list.append(feature_data)
                 # Only now, since we have a complete and valid feature, add to the detailed_features list
                 detailed_features.append(special_value)

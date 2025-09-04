@@ -77,6 +77,7 @@ class MainPage(tk.Tk):
             "log_level": tk.StringVar(),  # Replaces debugger with log level
             "logging_method": tk.StringVar(), # For logging handler (Console, File, Both)
             "BuildingGeneratorVer": tk.StringVar(),
+             "MaxGeojsonDraw": tk.IntVar(),# Visualization limits
         }
         self.shared_data["BMS_version"].set("-")
         self.shared_data["Theater"].set("-")
@@ -86,6 +87,7 @@ class MainPage(tk.Tk):
         self.shared_data["Geopath"].set("No GeoJson file selected")
         self.shared_data["log_level"].set("INFO")  # Default log level
         self.shared_data["logging_method"].set("None") # Default logging_method (disabled as per user specification)
+        self.shared_data["MaxGeojsonDraw"].set(256)# Default maximum GeoJSON buildings to render
         
         # Initialize Auto_Load attribute for settings window integration
         self.Auto_Load = tk.BooleanVar(value=False)
@@ -105,7 +107,7 @@ class MainPage(tk.Tk):
             frame.grid(row=0, column=0, sticky="nsew")
 
         # Set Name and Icon and version
-        self.shared_data["BuildingGeneratorVer"].set("Building Generator v1.7")
+        self.shared_data["BuildingGeneratorVer"].set("Building Generator v1.8")
         self.title(self.shared_data["BuildingGeneratorVer"].get())
         self.iconbitmap("Assets/icon_128.ico")
 
@@ -590,6 +592,7 @@ class MainPage(tk.Tk):
                 "textbox_floor_height": self.frames["GeoDataPage"].textbox_floor_height.get(),
                 "sorting_saving": self.frames["OperationPage"].sorting_saving.get(),
                 "distribution_selection": self.frames["OperationPage"].distribution_selection.get(),
+                "MaxGeojsonDraw": str(self.shared_data["MaxGeojsonDraw"].get()),# Visualization config
             }
             
             # Check if configuration file already exists in data_components folder
@@ -651,6 +654,11 @@ class MainPage(tk.Tk):
             self.shared_data["projection_string"].set(loaded_data.get("projection_string", ""))
             self.shared_data['backup_bms_files'] = loaded_data.get('backup_bms_files', '0') # Default to '0' (False)
             self.shared_data['backup_features_files'] = loaded_data.get('backup_features_files', '0') # Default to '0' (False)
+            try:
+                max_geo = int(loaded_data.get("MaxGeojsonDraw", 256)) # Visualization config (default 256)
+            except Exception:
+                max_geo = 256
+            self.shared_data["MaxGeojsonDraw"].set(max(10, min(1000, max_geo)))
             
             # Load and apply logging configuration using settings_window.py mapping approach
             log_level = loaded_data.get("log_level", "INFO")
@@ -4627,19 +4635,42 @@ class OperationPage(tk.Frame):
         # Will show 2D or 3D graphs of both BMS features and Geo Bondingbox
         if plot_option == "Both":
             LoadedBMSModels = self.controller.shared_data["BMS_Databse"]
+            # Build display set: include all fitted Geo features plus extra from full set up to 256
+            try:
+                all_geo = self.controller.shared_data["Geodata"]
+                all_calc = self.controller.shared_data["Calc_Geodata"]
+                fitted_geo = self.Filltered_GeoFeatures if hasattr(self, 'Filltered_GeoFeatures') else None
+                # Use user-configured limit (10-1000), default 256
+                cfg_limit = 256
+                try:
+                    cfg_limit = int(self.controller.shared_data["MaxGeojsonDraw"].get())
+                except Exception:
+                    cfg_limit = 256
+                cfg_limit = max(10, min(1000, cfg_limit))
+                allowed = min(cfg_limit, len(all_geo)) if all_geo is not None else 0
+                fitted_idx = list(fitted_geo.index) if fitted_geo is not None and not fitted_geo.empty else []
+                extra_needed = max(0, allowed - len(fitted_idx))
+                extra_idx = [i for i in all_geo.index if i not in fitted_idx][:extra_needed]
+                display_idx = fitted_idx + extra_idx
+                geo_display = all_geo.loc[display_idx] if allowed > 0 else fitted_geo
+                calc_display = all_calc.loc[display_idx].values if allowed > 0 else self.Filltered_Calc_GeoFeatures
+            except Exception:
+                # Fallback to previous filtered data on any issue
+                geo_display = self.Filltered_GeoFeatures
+                calc_display = self.Filltered_Calc_GeoFeatures
             if Dimension == "2D":
                 Show_Selected_Features_2D(
                     plot_option,
-                    self.Filltered_GeoFeatures,
-                    self.Filltered_Calc_GeoFeatures,
+                    geo_display,
+                    calc_display,
                     self.BMS_features_map,
                     LoadedBMSModels,
                 )
             elif Dimension == "3D":
                 Show_Selected_Features_3D(
                     plot_option,
-                    self.Filltered_GeoFeatures,
-                    self.Filltered_Calc_GeoFeatures,
+                    geo_display,
+                    calc_display,
                     self.BMS_features_map,
                     LoadedBMSModels,
                 )
@@ -4669,16 +4700,57 @@ class OperationPage(tk.Frame):
         # Will show 2D or 3D graph of Geo Bondingbox
         elif plot_option == "JSON_BondingBox":
             if Dimension == "2D":
+                # Build display set: include all fitted Geo features plus extra from full set up to 256
+                try:
+                    all_geo = self.controller.shared_data["Geodata"]
+                    all_calc = self.controller.shared_data["Calc_Geodata"]
+                    fitted_geo = self.Filltered_GeoFeatures if hasattr(self, 'Filltered_GeoFeatures') else None
+                    cfg_limit = 256
+                    try:
+                        cfg_limit = int(self.controller.shared_data["MaxGeojsonDraw"].get())
+                    except Exception:
+                        cfg_limit = 256
+                    cfg_limit = max(10, min(1000, cfg_limit))
+                    allowed = min(cfg_limit, len(all_geo)) if all_geo is not None else 0
+                    fitted_idx = list(fitted_geo.index) if fitted_geo is not None and not fitted_geo.empty else []
+                    extra_needed = max(0, allowed - len(fitted_idx))
+                    extra_idx = [i for i in all_geo.index if i not in fitted_idx][:extra_needed]
+                    display_idx = fitted_idx + extra_idx
+                    geo_display = all_geo.loc[display_idx] if allowed > 0 else fitted_geo
+                    calc_display = all_calc.loc[display_idx].values if allowed > 0 else self.Filltered_Calc_GeoFeatures
+                except Exception:
+                    geo_display = self.Filltered_GeoFeatures
+                    calc_display = self.Filltered_Calc_GeoFeatures
                 Show_Selected_Features_2D(
                     plot_option,
-                    self.Filltered_GeoFeatures,
-                    self.Filltered_Calc_GeoFeatures,
+                    geo_display,
+                    calc_display,
                 )
             elif Dimension == "3D":
+                try:
+                    all_geo = self.controller.shared_data["Geodata"]
+                    all_calc = self.controller.shared_data["Calc_Geodata"]
+                    fitted_geo = self.Filltered_GeoFeatures if hasattr(self, 'Filltered_GeoFeatures') else None
+                    cfg_limit = 256
+                    try:
+                        cfg_limit = int(self.controller.shared_data["MaxGeojsonDraw"].get())
+                    except Exception:
+                        cfg_limit = 256
+                    cfg_limit = max(10, min(1000, cfg_limit))
+                    allowed = min(cfg_limit, len(all_geo)) if all_geo is not None else 0
+                    fitted_idx = list(fitted_geo.index) if fitted_geo is not None and not fitted_geo.empty else []
+                    extra_needed = max(0, allowed - len(fitted_idx))
+                    extra_idx = [i for i in all_geo.index if i not in fitted_idx][:extra_needed]
+                    display_idx = fitted_idx + extra_idx
+                    geo_display = all_geo.loc[display_idx] if allowed > 0 else fitted_geo
+                    calc_display = all_calc.loc[display_idx].values if allowed > 0 else self.Filltered_Calc_GeoFeatures
+                except Exception:
+                    geo_display = self.Filltered_GeoFeatures
+                    calc_display = self.Filltered_Calc_GeoFeatures
                 Show_Selected_Features_3D(
                     plot_option,
-                    self.Filltered_GeoFeatures,
-                    self.Filltered_Calc_GeoFeatures,
+                    geo_display,
+                    calc_display,
                 )
 
     def segemented_button_1_selection(self, value):

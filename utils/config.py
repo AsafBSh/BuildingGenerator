@@ -20,6 +20,8 @@ class SharedData:
         self.projection_string = tk.StringVar()
         self.Startup = tk.StringVar()
         self.debugger = tk.BooleanVar()
+        # Future: configurable visualization limits
+        self.max_geojson_draw = tk.IntVar(value=256)
         
         # Data storage
         self.BMS_Databse = None

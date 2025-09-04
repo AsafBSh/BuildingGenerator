@@ -216,7 +216,9 @@ def Show_Selected_Features_2D(
 
     # Create a function to draw buildings with better styling
     def draw_buildings(ax, buildings_data, calc_data, color, alpha, is_geo=True):
-        for i in range(len(buildings_data)):
+        # Limit maximum buildings drawn
+        max_draw = min(len(buildings_data), 256)
+        for i in range(max_draw):
             feature = buildings_data.iloc[i]
             length = feature["length"]
             width = feature["width"]
@@ -228,32 +230,63 @@ def Show_Selected_Features_2D(
             x_distance = calc_data[i, 5]
             y_distance = calc_data[i, 6]
             
-            # Calculate corner points
-            corner_points = np.array([
-                [-width / 2, -length / 2],
-                [width / 2, -length / 2],
-                [width / 2, length / 2],
-                [-width / 2, length / 2],
-            ])
-            
-            # Apply rotation
-            rotation_matrix = np.array([
-                [np.cos(np.radians(rotation)), -np.sin(np.radians(rotation))],
-                [np.sin(np.radians(rotation)), np.cos(np.radians(rotation))],
-            ])
-            rotated_points = np.dot(corner_points, rotation_matrix.T)
-            
-            # Translate points
-            translated_points = rotated_points + [y_distance, x_distance]
-            
-            # Close the shape
-            translated_points = np.concatenate([translated_points, translated_points[0:1]])
-            
-            # Plot building outline
-            ax.plot(translated_points[:, 1], translated_points[:, 0], color=color, linewidth=1.5, alpha=alpha)
-            
-            # Fill building with color
-            ax.fill(translated_points[:, 1], translated_points[:, 0], color=color, alpha=alpha*0.3)
+            # If real footprint is available, draw it; otherwise fall back to bounding box
+            footprint_rel = feature.get("footprint_rel", None) if isinstance(feature, dict) else feature.get("footprint_rel")
+            if footprint_rel is not None and isinstance(footprint_rel, (list, tuple)) and len(footprint_rel) >= 3:
+                try:
+                    fp = np.array(footprint_rel, dtype=float)
+                    # footprint_rel is [x_rel, y_rel] in feet; plotting expects [y, x]
+                    fp_yx = np.column_stack((fp[:, 1], fp[:, 0]))
+                    translated_points = fp_yx + [y_distance, x_distance]
+                    # Close the shape
+                    translated_points = np.vstack((translated_points, translated_points[0]))
+                    # Draw
+                    ax.plot(translated_points[:, 1], translated_points[:, 0], color=color, linewidth=1.2, alpha=alpha)
+                    ax.fill(translated_points[:, 1], translated_points[:, 0], color=color, alpha=alpha * 0.25)
+                except Exception:
+                    # Fallback to rectangle if footprint fails
+                    corner_points = np.array([
+                        [-width / 2, -length / 2],
+                        [width / 2, -length / 2],
+                        [width / 2, length / 2],
+                        [-width / 2, length / 2],
+                    ])
+                    rotation_matrix = np.array([
+                        [np.cos(np.radians(rotation)), -np.sin(np.radians(rotation))],
+                        [np.sin(np.radians(rotation)), np.cos(np.radians(rotation))],
+                    ])
+                    rotated_points = np.dot(corner_points, rotation_matrix.T)
+                    translated_points = rotated_points + [y_distance, x_distance]
+                    translated_points = np.concatenate([translated_points, translated_points[0:1]])
+                    ax.plot(translated_points[:, 1], translated_points[:, 0], color=color, linewidth=1.5, alpha=alpha)
+                    ax.fill(translated_points[:, 1], translated_points[:, 0], color=color, alpha=alpha*0.3)
+            else:
+                # Calculate corner points
+                corner_points = np.array([
+                    [-width / 2, -length / 2],
+                    [width / 2, -length / 2],
+                    [width / 2, length / 2],
+                    [-width / 2, length / 2],
+                ])
+                
+                # Apply rotation
+                rotation_matrix = np.array([
+                    [np.cos(np.radians(rotation)), -np.sin(np.radians(rotation))],
+                    [np.sin(np.radians(rotation)), np.cos(np.radians(rotation))],
+                ])
+                rotated_points = np.dot(corner_points, rotation_matrix.T)
+                
+                # Translate points
+                translated_points = rotated_points + [y_distance, x_distance]
+                
+                # Close the shape
+                translated_points = np.concatenate([translated_points, translated_points[0:1]])
+                
+                # Plot building outline
+                ax.plot(translated_points[:, 1], translated_points[:, 0], color=color, linewidth=1.5, alpha=alpha)
+                
+                # Fill building with color
+                ax.fill(translated_points[:, 1], translated_points[:, 0], color=color, alpha=alpha*0.3)
             
             # Add label at center
             if is_geo:
@@ -421,7 +454,8 @@ def Show_Selected_Features_3D(
     
     # Process building data if available
     if buildings is not None and len(buildings) > 0:
-        for i in range(len(buildings)):
+        max_draw = min(len(buildings), 256)
+        for i in range(max_draw):
             feature = buildings.iloc[i]
             length = feature["length"]
             width = feature["width"]
@@ -439,7 +473,8 @@ def Show_Selected_Features_3D(
                 "y": y_distance,
                 "idx": i,
                 "name": f"B{i}",
-                "type": "geo"
+                "type": "geo",
+                "footprint_rel": feature.get("footprint_rel", None) if isinstance(feature, dict) else feature.get("footprint_rel")
             })
             
             # Update bounds
@@ -532,77 +567,100 @@ def Show_Selected_Features_3D(
         x_distance = building["x"]
         y_distance = building["y"]
         z_distance = building.get("z", 0)
-        
-        # Create corner points for the building (bottom and top)
-        corner_points = np.array([
-            [-width / 2, -length / 2, 0],
-            [width / 2, -length / 2, 0],
-            [width / 2, length / 2, 0],
-            [-width / 2, length / 2, 0],
-            [-width / 2, -length / 2, height],
-            [width / 2, -length / 2, height],
-            [width / 2, length / 2, height],
-            [-width / 2, length / 2, height],
-        ])
-        
-        # Apply rotation
-        rotation_matrix = np.array([
-            [np.cos(np.radians(rotation)), -np.sin(np.radians(rotation)), 0],
-            [np.sin(np.radians(rotation)), np.cos(np.radians(rotation)), 0],
-            [0, 0, 1],
-        ])
-        rotated_points = np.dot(corner_points, rotation_matrix.T)
-        
-        # Translate the points
-        translated_points = rotated_points + [y_distance, x_distance, z_distance]
-        
-        # Define the faces of the building
-        faces = [
-            [translated_points[i] for i in [0, 1, 5, 4]],  # Front face
-            [translated_points[i] for i in [1, 2, 6, 5]],  # Right face
-            [translated_points[i] for i in [2, 3, 7, 6]],  # Back face
-            [translated_points[i] for i in [3, 0, 4, 7]],  # Left face
-            [translated_points[i] for i in [0, 1, 2, 3]],  # Bottom face
-            [translated_points[i] for i in [4, 5, 6, 7]],  # Top face
-        ]
-        
-        # Determine color based on height if not specified
-        if color == 'auto':
-            import matplotlib.cm as cm
-            norm_height = building["height"] / z_max if z_max > 0 else 0.5
-            color = cm.viridis(norm_height)
-        
-        # Draw each face with proper coloring
-        for face in faces:
-            face_array = np.array(face)
-            z_values = np.array([face_array[:, 2]])
-            verts = [list(zip(face_array[:, 0], face_array[:, 1], z_values[0]))]
-            
-            # Add the polygon to the plot
-            poly = Poly3DCollection(
-                verts,
-                facecolors=color,
-                linewidths=1.5 if wireframe else 0.5,
-                edgecolors='k',
-                alpha=alpha
-            )
-            ax.add_collection3d(poly)
-        
-        # Draw building shadow on the ground
-        if not wireframe:
-            ground_shadow = np.array([
-                [translated_points[i][0], translated_points[i][1], 0] for i in range(4)
+
+        footprint_rel = building.get("footprint_rel")
+        if footprint_rel is not None and isinstance(footprint_rel, (list, tuple)) and len(footprint_rel) >= 3:
+            # Extrude actual footprint
+            fp = np.array(footprint_rel, dtype=float)
+            # Arrange as [y, x, z]
+            bottom = np.column_stack((fp[:, 1], fp[:, 0], np.zeros(len(fp))))
+            top = bottom.copy()
+            top[:, 2] = height
+            # Translate to world position (no extra rotation to avoid double-rotation)
+            bottom_translated = bottom + [y_distance, x_distance, z_distance]
+            top_translated = top + [y_distance, x_distance, z_distance]
+
+            # Build side faces
+            faces = []
+            n = len(bottom_translated)
+            for i in range(n):
+                j = (i + 1) % n
+                faces.append([bottom_translated[i], bottom_translated[j], top_translated[j], top_translated[i]])
+            # Add bottom and top faces
+            faces.append(list(bottom_translated))
+            faces.append(list(top_translated))
+
+            # Draw faces
+            for face in faces:
+                face_array = np.array(face)
+                z_values = np.array([face_array[:, 2]])
+                verts = [list(zip(face_array[:, 0], face_array[:, 1], z_values[0]))]
+                poly = Poly3DCollection(
+                    verts,
+                    facecolors=color,
+                    linewidths=1.0 if wireframe else 0.5,
+                    edgecolors='k',
+                    alpha=alpha
+                )
+                ax.add_collection3d(poly)
+
+            return top_translated
+        else:
+            # Fallback to oriented bounding box prism
+            corner_points = np.array([
+                [-width / 2, -length / 2, 0],
+                [width / 2, -length / 2, 0],
+                [width / 2, length / 2, 0],
+                [-width / 2, length / 2, 0],
+                [-width / 2, -length / 2, height],
+                [width / 2, -length / 2, height],
+                [width / 2, length / 2, height],
+                [-width / 2, length / 2, height],
             ])
-            shadow_verts = [list(zip(ground_shadow[:, 0], ground_shadow[:, 1], ground_shadow[:, 2]))]
-            shadow = Poly3DCollection(
-                shadow_verts,
-                facecolors='gray',
-                linewidths=0,
-                alpha=0.15
-            )
-            ax.add_collection3d(shadow)
-        
-        return translated_points
+            rotation_matrix = np.array([
+                [np.cos(np.radians(rotation)), -np.sin(np.radians(rotation)), 0],
+                [np.sin(np.radians(rotation)), np.cos(np.radians(rotation)), 0],
+                [0, 0, 1],
+            ])
+            rotated_points = np.dot(corner_points, rotation_matrix.T)
+            translated_points = rotated_points + [y_distance, x_distance, z_distance]
+            faces = [
+                [translated_points[i] for i in [0, 1, 5, 4]],
+                [translated_points[i] for i in [1, 2, 6, 5]],
+                [translated_points[i] for i in [2, 3, 7, 6]],
+                [translated_points[i] for i in [3, 0, 4, 7]],
+                [translated_points[i] for i in [0, 1, 2, 3]],
+                [translated_points[i] for i in [4, 5, 6, 7]],
+            ]
+            if color == 'auto':
+                import matplotlib.cm as cm
+                norm_height = building["height"] / z_max if z_max > 0 else 0.5
+                color = cm.viridis(norm_height)
+            for face in faces:
+                face_array = np.array(face)
+                z_values = np.array([face_array[:, 2]])
+                verts = [list(zip(face_array[:, 0], face_array[:, 1], z_values[0]))]
+                poly = Poly3DCollection(
+                    verts,
+                    facecolors=color,
+                    linewidths=1.5 if wireframe else 0.5,
+                    edgecolors='k',
+                    alpha=alpha
+                )
+                ax.add_collection3d(poly)
+            if not wireframe:
+                ground_shadow = np.array([
+                    [translated_points[i][0], translated_points[i][1], 0] for i in range(4)
+                ])
+                shadow_verts = [list(zip(ground_shadow[:, 0], ground_shadow[:, 1], ground_shadow[:, 2]))]
+                shadow = Poly3DCollection(
+                    shadow_verts,
+                    facecolors='gray',
+                    linewidths=0,
+                    alpha=0.15
+                )
+                ax.add_collection3d(shadow)
+            return translated_points
     
     # Create ground plane function
     def create_ground_plane(ax, x_min, x_max, y_min, y_max):

@@ -606,6 +606,84 @@ class SettingsWindow(tk.Toplevel):
         )
         self.editor_path_entry.pack(side=tk.LEFT, padx=8, pady=8, fill=tk.X, expand=True)
         
+        # Visualization Options - Max GeoJSON buildings
+        viz_options_frame = Ctk.CTkFrame(content_frame, fg_color="#E0E8F0", border_width=1, border_color="#B3C8DD")
+        viz_options_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        viz_title_label = Ctk.CTkLabel(
+            viz_options_frame,
+            text="Graphs Options",
+            font=("Arial", 16, "bold"),
+            text_color="#000033",
+            fg_color="transparent"
+        )
+        viz_title_label.pack(anchor="w", padx=12, pady=(12, 6))
+
+        viz_row = Ctk.CTkFrame(viz_options_frame, fg_color="#E0E8F0")
+        viz_row.pack(fill=tk.X, padx=10, pady=5)
+
+        max_geo_label = Ctk.CTkLabel(
+            viz_row,
+            text="Max GeoJSON buildings (10-1000):",
+            width=220,
+            anchor="w",
+            text_color="#2E2E3A",
+            font=("Arial", 12)
+        )
+        max_geo_label.pack(side=tk.LEFT, padx=(8, 0))
+
+        # Initialize variable from parent shared data if available
+        current_max = 256
+        try:
+            if self.parent and self.parent.shared_data and self.parent.shared_data.get("MaxGeojsonDraw"):
+                current_max = int(self.parent.shared_data["MaxGeojsonDraw"].get())
+        except Exception:
+            current_max = 256
+
+        self.max_geojson_var = tk.StringVar(value=str(current_max))
+        self.max_geojson_entry = Ctk.CTkEntry(
+            viz_row,
+            textvariable=self.max_geojson_var,
+            width=100,
+            fg_color="#FFFFFF",
+            text_color="#000000",
+            border_width=1,
+            border_color="#B3C8DD",
+            font=("Arial", 11)
+        )
+        self.max_geojson_entry.pack(side=tk.LEFT, padx=8, pady=8)
+
+        def _save_max_geojson():
+            val_str = self.max_geojson_var.get().strip()
+            try:
+                val = int(val_str)
+            except ValueError:
+                messagebox.showerror("Invalid value", "Please enter a number between 10 and 1000.")
+                return
+            if val < 10:
+                val = 10
+            if val > 1000:
+                val = 1000
+            # Update entry (clamped) and shared data
+            self.max_geojson_var.set(str(val))
+            try:
+                if self.parent and self.parent.shared_data and self.parent.shared_data.get("MaxGeojsonDraw"):
+                    self.parent.shared_data["MaxGeojsonDraw"].set(val)
+            except Exception:
+                pass
+            messagebox.showinfo("Saved", f"Max GeoJSON buildings set to {val}.")
+
+        save_btn = Ctk.CTkButton(
+            viz_row,
+            text="Save",
+            command=_save_max_geojson,
+            fg_color="#A1B9D0",
+            hover_color="#7A92A9",
+            text_color="#000000",
+            width=80
+        )
+        save_btn.pack(side=tk.LEFT, padx=8)
+
         # Create container for logging section with modern styling
         logging_frame = Ctk.CTkFrame(content_frame, fg_color="#E0E8F0", border_width=1, border_color="#B3C8DD")
         logging_frame.pack(fill=tk.X, padx=10, pady=10)
