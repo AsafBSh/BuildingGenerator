@@ -56,6 +56,8 @@ class BmsInjectionWindow(tk.Toplevel):
         self.type_keys = []
         self.type_values = []
         self.loading = True
+        self._destroying = False  # Flag to prevent multiple destroy calls
+        self._scheduled_destroy = None  # Track scheduled destroy operations
         
         # Store all initialization functions here for deferred execution
         self.init_functions = [
@@ -580,7 +582,7 @@ class BmsInjectionWindow(tk.Toplevel):
         Ctk.CTkButton(
             button_frame,
             text="Cancel",
-            command=self.destroy,
+            command=self._cancel_operation,
             fg_color="#8DBBE7",
             hover_color="#6A9AC9",
             text_color="#000000"
@@ -721,10 +723,37 @@ class BmsInjectionWindow(tk.Toplevel):
         # Check CT number
         try:
             ct_num = int(self.ct_entry.get())
-            if not self.injector.is_objective_ct(ct_num):
-                messagebox.showerror("Invalid CT", f"CT {ct_num} is not a valid objective CT number.")
+            # Accept if CT exists and is an objective, OR if it's the next available number (highest + 1)
+            is_existing_objective_ct = self.injector.is_objective_ct(ct_num)
+            is_next_new_ct = False
+            highest_ct = 0
+            try:
+                if self.injector.is_valid_installation:
+                    logger.debug(f"[_validate_inputs] Parsing CT file to compute highest CT (path={self.injector.ct_file})")
+                    tree = ET.parse(self.injector.ct_file)
+                    root = tree.getroot()
+                    for ct in root.findall("CT"):
+                        try:
+                            ct_val = int(ct.get("Num"))
+                            highest_ct = max(highest_ct, ct_val)
+                        except (ValueError, TypeError):
+                            logger.debug("[_validate_inputs] Skipping CT with non-integer Num")
+                            pass
+                is_next_new_ct = (ct_num == highest_ct + 1)
+            except Exception as compute_err:
+                logger.warning(f"[_validate_inputs] Failed to compute highest CT: {compute_err}")
+                # If we cannot determine highest_ct, fall back to existing-objective check only
+                is_next_new_ct = False
+            logger.info(f"[_validate_inputs] CT check: ct_num={ct_num}, is_existing_objective_ct={is_existing_objective_ct}, highest_ct={highest_ct}, is_next_new_ct={is_next_new_ct}")
+            if not is_existing_objective_ct and not is_next_new_ct:
+                logger.warning(f"[_validate_inputs] CT invalid: ct_num={ct_num}, next_available={highest_ct + 1}")
+                messagebox.showerror(
+                    "Invalid CT",
+                    f"CT {ct_num} is not a valid objective CT number. Next available is {highest_ct + 1}."
+                )
                 return False
         except ValueError:
+            logger.warning("[_validate_inputs] CT number is not an integer")
             messagebox.showerror("Invalid CT", "CT number must be an integer.")
             return False
             
@@ -738,14 +767,8 @@ class BmsInjectionWindow(tk.Toplevel):
                 )
                 return False
                 
-            # Check if objective already exists (only when adding, not when saving)
-            if self.injector.objective_exists(obj_num):
-                response = messagebox.askyesno(
-                    "Objective Exists",
-                    f"Objective {obj_num} already exists. Do you want to overwrite it?"
-                )
-                if not response:
-                    return False
+            # Note: Overwrite confirmation will happen later in MainCode.py when features are generated
+            # This allows users to configure settings without being prompted about overwriting
         except ValueError:
             messagebox.showerror("Invalid Objective", "Objective number must be an integer.")
             return False
@@ -765,18 +788,26 @@ class BmsInjectionWindow(tk.Toplevel):
         
     def _get_form_values(self):
         """Get all form values as a simplified dictionary with only core data."""
-        # Only get core values without fields as per requirements
-        settings = {
-            "reset_pd": self.reset_pd_var.get(),
-            "bms_path": str(self.bms_path),
-            "ct_num": int(self.ct_entry.get()),
-            "obj_num": int(self.obj_entry.get()),
-            "name": self.name_entry.get(),
-            "type": self._get_selected_type_key()
-            # Fields are no longer saved here, they are now saved to objectives_template.json
-        }
-        
-        return settings
+        try:
+            # Check if window is being destroyed
+            if hasattr(self, '_destroying') and self._destroying:
+                return {}
+                
+            # Only get core values without fields as per requirements
+            settings = {
+                "reset_pd": self.reset_var.get(),
+                "bms_path": str(self.bms_path),
+                "ct_num": int(self.ct_entry.get()),
+                "obj_num": int(self.obj_entry.get()),
+                "name": self.name_entry.get(),
+                "type": self._get_selected_type_key()
+                # Fields are no longer saved here, they are now saved to objectives_template.json
+            }
+            
+            return settings
+        except (tk.TclError, AttributeError) as e:
+            logger.warning(f"Error getting form values (window may be destroying): {e}")
+            return {}
 
     def load_previous_settings(self):
         """Load previous saved settings if they exist."""
@@ -1110,16 +1141,15 @@ class BmsInjectionWindow(tk.Toplevel):
         Calculate median values for fields based on existing objectives of the same type.
         Only updates the GUI fields, does not save data to any file.
         """
-        import xml.etree.ElementTree as ET
-        from pathlib import Path
-        import os
-        import traceback
+        from processing_window import ProcessType, run_template_generation
         from tkinter import messagebox
+        import os
         
         # 1. Initialization - Get the selected type and validate BMS path
         type_key = self._get_selected_type_key()
         if not type_key:
             logger.warning("No objective type selected")
+            messagebox.showwarning("No Type Selected", "Please select an objective type first.")
             return False
             
         type_name = self._get_type_name(type_key)
@@ -1131,6 +1161,70 @@ class BmsInjectionWindow(tk.Toplevel):
             messagebox.showerror("Error", "Invalid BMS installation path")
             return False
             
+        # Define the calculation task that will run in the background
+        def calculate_default_values_task(processing_window=None):
+            """Background task to calculate median values for the selected objective type."""
+            return self._calculate_median_values_for_type(type_key, type_name)
+        
+        # Run the calculation with a processing window
+        logger.info(f"[CALCULATE DEFAULT] Starting default value calculation with processing window for type {type_key}")
+        result = run_template_generation(
+            parent=self,
+            task_function=calculate_default_values_task,
+            process_type=ProcessType.CALCULATE_DEFAULT_VALUES,
+            title="Calculating Default Values",
+            message=f"Calculating median values for {type_name} objectives..."
+        )
+        
+        # Handle the result
+        if result and isinstance(result, dict) and result.get('success'):
+            calculated_values = result.get('calculated_values', {})
+            ocd_count = result.get('ocd_count', 0)
+            field_count = result.get('field_count', 0)
+            
+            # Update the GUI fields with calculated values
+            self._update_gui_fields_with_values(calculated_values)
+            
+            # Show success message
+            messagebox.showinfo(
+                "Reset Complete",
+                f"Successfully calculated median values from {ocd_count} existing objectives.\n"
+                f"Updated {field_count} fields with median values."
+            )
+            return True
+        elif result and isinstance(result, dict) and result.get('success') is False:
+            # No matching objectives found
+            messagebox.showwarning(
+                "No Matching Objectives Found",
+                f"No objectives of type {type_key} ({type_name}) were found.\n"
+                f"Field values have been kept as is."
+            )
+            return False
+        else:
+            # Error occurred
+            messagebox.showerror(
+                "Error",
+                "An error occurred while calculating default values. Check the console for details."
+            )
+            return False
+    
+    def _calculate_median_values_for_type(self, type_key, type_name):
+        """
+        Calculate median values for fields based on existing objectives of the given type.
+        This method contains the core processing logic separated from UI updates.
+        
+        Args:
+            type_key: The objective type key (1-31)
+            type_name: The human-readable name of the objective type
+            
+        Returns:
+            dict: Result dictionary with success status, calculated values, and counts
+        """
+        import xml.etree.ElementTree as ET
+        from pathlib import Path
+        import os
+        import traceback
+        
         # Define field names to collect values for
         median_fields = [
             "DataRate", "DeaggDistance", "Det_NoMove", "Det_Foot", "Det_Wheeled",
@@ -1148,8 +1242,10 @@ class BmsInjectionWindow(tk.Toplevel):
             ct_file_path = os.path.join(self.bms_path, "Falcon4_CT.xml")
             if not os.path.exists(ct_file_path):
                 logger.error(f"CT file not found at {ct_file_path}")
-                messagebox.showerror("Error", f"CT file not found at {ct_file_path}")
-                return False
+                return {
+                    'success': False,
+                    'error': f"CT file not found at {ct_file_path}"
+                }
                 
             logger.info(f"Loading CT file: {ct_file_path}")
             ct_tree = ET.parse(ct_file_path)
@@ -1169,8 +1265,10 @@ class BmsInjectionWindow(tk.Toplevel):
             obj_dir = os.path.join(self.bms_path, "ObjectiveRelatedData")
             if not os.path.exists(obj_dir) or not os.path.isdir(obj_dir):
                 logger.error(f"ObjectiveRelatedData directory not found at {obj_dir}")
-                messagebox.showerror("Error", f"ObjectiveRelatedData directory not found at {obj_dir}")
-                return False
+                return {
+                    'success': False,
+                    'error': f"ObjectiveRelatedData directory not found at {obj_dir}"
+                }
                 
             # Verify CT file structure
             ct_entries = ct_root.findall('.//CT')
@@ -1339,59 +1437,83 @@ class BmsInjectionWindow(tk.Toplevel):
                     else:
                         calculated_values[field] = "0"
             
-            # 5. UI Update - Update the GUI entries with calculated values
-            updated_fields = set()
-            field_count = 0
+            # Count fields that would be updated
+            field_count = len([field for field in calculated_values.keys() if field in self.field_entries])
             
-            # Make sure we have the field entries before trying to update them
-            if not hasattr(self, 'field_entries') or not self.field_entries:
-                return False
-                
-            for field_name, entry in self.field_entries.items():
-                if field_name in calculated_values and field_name not in updated_fields:
-                    value = calculated_values[field_name]
-                    # Clear and update the entry
-                    entry.delete(0, tk.END)
-                    entry.insert(0, str(value))
-                    
-                    # Count updated fields and mark as updated
-                    field_count += 1
-                    updated_fields.add(field_name)
-            
-            # Reset complete
-            
-            # Show success/failure message
+            # Return result based on success
             if ocd_count == 0:
                 # No matching OCD files found
-                messagebox.showwarning(
-                    "No Matching Objectives Found",
-                    f"No objectives of type {type_key} ({type_name}) were found.\n"
-                    f"Field values have been kept as is."
-                )
-                return False
+                logger.warning(f"No objectives of type {type_key} ({type_name}) were found")
+                return {
+                    'success': False,
+                    'ocd_count': 0,
+                    'field_count': 0,
+                    'calculated_values': {}
+                }
             else:
-                # Successfully updated fields
-                messagebox.showinfo(
-                    "Reset Complete",
-                    f"Successfully calculated median values from {ocd_count} existing objectives.\n"
-                    f"Updated {field_count} fields with median values."
-                )
-                return True
+                # Successfully calculated values
+                logger.info(f"Successfully calculated median values from {ocd_count} existing objectives, updating {field_count} fields")
+                return {
+                    'success': True,
+                    'ocd_count': ocd_count,
+                    'field_count': field_count,
+                    'calculated_values': calculated_values
+                }
                 
         except Exception as e:
-            # Log and display any errors
-            error_msg = f"Error resetting fields to defaults: {e}"
+            # Log the error
+            error_msg = f"Error calculating median values: {e}"
             logger.error(f"ERROR: {error_msg}")
             traceback.print_exc()
-            messagebox.showerror("Error", error_msg)
-            return False
+            return {
+                'success': False,
+                'error': error_msg,
+                'ocd_count': 0,
+                'field_count': 0,
+                'calculated_values': {}
+            }
+    
+    def _update_gui_fields_with_values(self, calculated_values):
+        """
+        Update the GUI field entries with the calculated values.
+        
+        Args:
+            calculated_values: Dictionary of field names to calculated values
+        """
+        updated_fields = set()
+        field_count = 0
+        
+        # Make sure we have the field entries before trying to update them
+        if not hasattr(self, 'field_entries') or not self.field_entries:
+            logger.warning("No field entries available to update")
+            return 0
+            
+        for field_name, entry in self.field_entries.items():
+            if field_name in calculated_values and field_name not in updated_fields:
+                value = calculated_values[field_name]
+                # Clear and update the entry
+                entry.delete(0, tk.END)
+                entry.insert(0, str(value))
+                
+                # Count updated fields and mark as updated
+                field_count += 1
+                updated_fields.add(field_name)
+                logger.debug(f"Updated field {field_name} = {value}")
+        
+        logger.info(f"Updated {field_count} GUI fields with calculated values")
+        return field_count
 
     
     def _save_settings(self):
         """Save settings and close the window."""
         logger.info("SAVING OBJECTIVE SETTINGS")
         
-        # Validate inputs
+        # First validate all inputs including overwrite confirmation
+        if not self._validate_inputs():
+            logger.info("Settings save cancelled due to validation failure")
+            return
+        
+        # If we get here, validation passed - extract the validated values
         try:
             ct_num = int(self.ct_entry.get())
             obj_num = int(self.obj_entry.get())
@@ -1457,6 +1579,7 @@ class BmsInjectionWindow(tk.Toplevel):
         # Store in instance variable - use typed fields for actual operation
         # Still include fields in self.result for internal use
         self.result = {
+            "status": "success",  # Indicate successful validation and user confirmation
             "ct_num": ct_num,
             "obj_num": obj_num,
             "name": name,
@@ -1552,16 +1675,68 @@ class BmsInjectionWindow(tk.Toplevel):
         # Close window
         self.destroy()
     
+    def _cancel_operation(self):
+        """Cancel the operation and close the window without setting any result."""
+        logger.info("BMS injection operation cancelled by user")
+        # Explicitly set cancellation result
+        self.result = {
+            "status": "cancelled",
+            "reason": "user_cancelled"
+        }
+        self.destroy()
+    
+    def destroy(self):
+        """Override destroy to ensure proper cancellation handling."""
+        # Prevent multiple destroy calls
+        if hasattr(self, '_destroying') and self._destroying:
+            return
+        self._destroying = True
+        
+        try:
+            # If no result was set (e.g., window closed via X button), treat as cancellation
+            if not hasattr(self, 'result') or self.result is None:
+                logger.info("BMS injection window closed without result - treating as cancellation")
+                self.result = {
+                    "status": "cancelled", 
+                    "reason": "window_closed"
+                }
+        except Exception as e:
+            logger.error(f"Error setting result during destroy: {e}")
+        
+        try:
+            # Cancel any scheduled destroy operations
+            if self._scheduled_destroy:
+                self.after_cancel(self._scheduled_destroy)
+                self._scheduled_destroy = None
+            super().destroy()
+        except Exception as e:
+            logger.error(f"Error during window destruction: {e}")
+    
+    def _safe_destroy(self):
+        """Safely schedule window destruction, avoiding multiple scheduled calls."""
+        if hasattr(self, '_destroying') and self._destroying:
+            return
+            
+        if self._scheduled_destroy:
+            # Already scheduled, don't schedule again
+            return
+            
+        self._scheduled_destroy = self.after(100, self.destroy)
+    
     def _get_selected_type_key(self):
         """Get the key (numeric type) for the selected type."""
-        selected = self.type_var.get()
         try:
+            # Check if window is being destroyed
+            if hasattr(self, '_destroying') and self._destroying:
+                return 1  # Return default
+                
+            selected = self.type_var.get()
             index = self.type_values.index(selected)
             key = self.type_keys[index]
             logger.debug(f"Getting selected type key: {selected} -> {key}")
             return key
-        except (ValueError, IndexError):
-            default = self.type_keys[0] if self.type_keys else 1
+        except (ValueError, IndexError, tk.TclError):
+            default = self.type_keys[0] if hasattr(self, 'type_keys') and self.type_keys else 1
             logger.warning(f"Error getting type key, using default: {default}")
             return default
     
@@ -1671,6 +1846,7 @@ class BmsInjectionWindow(tk.Toplevel):
             except Exception:
                 pass
                 
+            logger.info(f"[_validate_ct] Evaluated CT {ct_num}: ct_exists={ct_exists}, is_objective={is_objective}, highest_ct={highest_ct}")
             # Update status based on validation rules
             if ct_exists and is_objective:
                 self.ct_info_label.configure(
@@ -1678,26 +1854,31 @@ class BmsInjectionWindow(tk.Toplevel):
                     text_color="orange",
                     fg_color="transparent"
                 )
+                logger.debug(f"[_validate_ct] CT {ct_num} exists and is an objective")
             elif ct_exists and not is_objective:
                 self.ct_info_label.configure(
                     text="⚠ CT is not an Objective",
                     text_color="brown",
                     fg_color="transparent"
                 )
+                logger.debug(f"[_validate_ct] CT {ct_num} exists but is not an objective")
             elif ct_num == highest_ct + 1:
                 self.ct_info_label.configure(
                     text="✓ Valid CT Number",
                     text_color="green",
                     fg_color="transparent"
                 )
+                logger.debug(f"[_validate_ct] CT {ct_num} accepted as next available (highest {highest_ct})")
             else:
                 self.ct_info_label.configure(
                     text="❌ Invalid CT Number",
                     text_color="red",
                     fg_color="transparent"
                 )
+                logger.debug(f"[_validate_ct] CT {ct_num} rejected; highest_ct={highest_ct}")
                 
         except ValueError:
+            logger.warning("[_validate_ct] Non-integer CT entry")
             self.ct_info_label.configure(
                 text="❌ Invalid CT number",
                 text_color="red",
@@ -1775,6 +1956,7 @@ class BmsInjectionWindow(tk.Toplevel):
         try:
             # Check if the CT file exists and is valid
             if not self.injector.is_valid_installation:
+                logger.warning("[_get_last_ct] Invalid installation; cannot compute highest CT")
                 messagebox.showwarning(
                     "Invalid Installation",
                     "Cannot find highest CT number without a valid BMS installation."
@@ -1802,6 +1984,7 @@ class BmsInjectionWindow(tk.Toplevel):
                 # Set the entry to highest + 1
                 self.ct_entry.delete(0, tk.END)
                 self.ct_entry.insert(0, str(highest_ct + 1))
+                logger.info(f"[_get_last_ct] Highest CT found: {highest_ct}; suggesting {highest_ct + 1}")
                 
                 # Validate the new CT number
                 self._validate_ct(None)
@@ -1814,6 +1997,7 @@ class BmsInjectionWindow(tk.Toplevel):
                 )
                 
             except Exception as e:
+                logger.error(f"[_get_last_ct] Error while finding highest CT: {e}")
                 self.ct_info_label.configure(
                     text=f"Error: {str(e)}",
                     text_color="red",
@@ -1965,6 +2149,7 @@ class BmsInjectionWindow(tk.Toplevel):
         try:
             # Check if the installation is valid
             if not self.injector.is_valid_installation:
+                logger.warning("[_get_last_obj] Invalid installation; cannot compute highest objective")
                 self.obj_info_label.configure(
                     text="Invalid BMS installation",
                     text_color="red",
@@ -1988,7 +2173,7 @@ class BmsInjectionWindow(tk.Toplevel):
                             highest_obj = max(cached_obj_nums)
                 except Exception as cache_err:
                     # Continue to file search if cache lookup fails
-                    logger.warning(f"Cache lookup failed: {cache_err}")
+                    logger.warning(f"[_get_last_obj] Cache lookup failed: {cache_err}")
                 
                 # If not found in cache, search through directory
                 if highest_obj == 0:
@@ -2006,6 +2191,7 @@ class BmsInjectionWindow(tk.Toplevel):
                 # Set the entry to highest + 1
                 self.obj_entry.delete(0, tk.END)
                 self.obj_entry.insert(0, str(highest_obj + 1))
+                logger.info(f"[_get_last_obj] Highest OBJ found: {highest_obj}; suggesting {highest_obj + 1}")
                 
                 # Validate the new objective number
                 self._validate_obj(None)
@@ -2018,6 +2204,7 @@ class BmsInjectionWindow(tk.Toplevel):
                 )
                 
             except Exception as e:
+                logger.error(f"[_get_last_obj] Error while finding highest objective: {e}")
                 self.obj_info_label.configure(
                     text=f"Error: {str(e)}",
                     text_color="red",
@@ -2294,7 +2481,18 @@ class BmsInjectionWindow(tk.Toplevel):
                 icon=messagebox.WARNING
             )
             if response:
-                self.analyze_ct_file_and_create_template()
+                result = self.analyze_ct_file_and_create_template()
+                if result is None:
+                    logger.error("Failed to create CT templates")
+                    messagebox.showerror(
+                        "Template Creation Failed",
+                        "Failed to create CT templates. The BMS Injection window will be closed."
+                    )
+                    self.result = {"status": "cancelled", "reason": "ct_template_creation_failed"}
+                    self._safe_destroy()
+                    return False
+                else:
+                    logger.info("CT templates created successfully")
             else:
                 self.destroy()
             return
@@ -2308,7 +2506,18 @@ class BmsInjectionWindow(tk.Toplevel):
                 icon=messagebox.WARNING
             )
             if response:
-                self.analyze_ct_file_and_create_template()
+                result = self.analyze_ct_file_and_create_template()
+                if result is None:
+                    logger.error("Failed to regenerate CT templates")
+                    messagebox.showerror(
+                        "Template Regeneration Failed",
+                        "Failed to regenerate CT templates. The BMS Injection window will be closed."
+                    )
+                    self.result = {"status": "cancelled", "reason": "ct_template_regeneration_failed"}
+                    self._safe_destroy()
+                    return False
+                else:
+                    logger.info("CT templates regenerated successfully")
             else:
                 # Show an info message before closing
                 messagebox.showinfo(
@@ -2321,7 +2530,7 @@ class BmsInjectionWindow(tk.Toplevel):
                 self.result = {"status": "cancelled", "reason": "missing_template"}
                 
                 # Execute this after all pending events to ensure proper closure
-                self.after(100, self.destroy)
+                self._safe_destroy()
             return
         
         # Required fields and their expected constant values if applicable
@@ -2431,7 +2640,7 @@ class BmsInjectionWindow(tk.Toplevel):
                 self.result = {"status": "cancelled", "reason": "missing_template"}
                 
                 # Execute this after all pending events to ensure proper closure
-                self.after(100, self.destroy)
+                self._safe_destroy()
                 
     def validate_objective_templates(self):
         """
@@ -2464,7 +2673,19 @@ class BmsInjectionWindow(tk.Toplevel):
             )
             
             if response:
-                self.analyze_ocd_files_and_create_objective_template()
+                result = self.analyze_ocd_files_and_create_objective_template()
+                if result is None:
+                    logger.error("Failed to create objective templates")
+                    messagebox.showerror(
+                        "Template Creation Failed",
+                        "Failed to create objective templates. The BMS Injection window will be closed."
+                    )
+                    # Create a result attribute to indicate failure
+                    self.result = {"status": "cancelled", "reason": "template_creation_failed"}
+                    self._safe_destroy()
+                    return False
+                else:
+                    logger.info("Objective templates created successfully")
             else:
                 # Show an info message before closing
                 messagebox.showinfo(
@@ -2477,7 +2698,7 @@ class BmsInjectionWindow(tk.Toplevel):
                 self.result = {"status": "cancelled", "reason": "missing_template"}
                 
                 # Execute this after all pending events to ensure proper closure
-                self.after(100, self.destroy)
+                self._safe_destroy()
             return False
                 
         # Load the template file
@@ -2491,7 +2712,18 @@ class BmsInjectionWindow(tk.Toplevel):
             
             if response:
                 logger.info("Regenerating objective templates due to empty file")
-                self.analyze_ocd_files_and_create_objective_template()
+                result = self.analyze_ocd_files_and_create_objective_template()
+                if result is None:
+                    logger.error("Failed to regenerate objective templates")
+                    messagebox.showerror(
+                        "Template Regeneration Failed",
+                        "Failed to regenerate objective templates. The BMS Injection window will be closed."
+                    )
+                    self.result = {"status": "cancelled", "reason": "template_regeneration_failed"}
+                    self._safe_destroy()
+                    return False
+                else:
+                    logger.info("Objective templates regenerated successfully")
             else:
                 # Show an info message before closing
                 messagebox.showinfo(
@@ -2504,7 +2736,7 @@ class BmsInjectionWindow(tk.Toplevel):
                 self.result = {"status": "cancelled", "reason": "empty_template"}
                 
                 # Execute this after all pending events to ensure proper closure
-                self.after(100, self.destroy)
+                self._safe_destroy()
             return False
                 
         # Validate all objective types and fields
@@ -2570,7 +2802,7 @@ class BmsInjectionWindow(tk.Toplevel):
                 self.result = {"status": "cancelled", "reason": "template_validation_failed"}
                 
                 # Execute this after all pending events to ensure proper closure
-                self.after(100, self.destroy)
+                self._safe_destroy()
             return False
         
         return True  # Validation passed
@@ -2591,7 +2823,7 @@ class BmsInjectionWindow(tk.Toplevel):
             return
             
         # Define the task that will run in the background with processing window
-        def ct_template_generation_task():
+        def ct_template_generation_task(processing_window):
             # Parse the CT file
             tree = ET.parse(self.injector.ct_file)
             root = tree.getroot()
@@ -2753,6 +2985,8 @@ class BmsInjectionWindow(tk.Toplevel):
             
             # Update the injector's templates
             self.injector.ct_templates = ct_templates
+
+            # Note: CT templates don't need to be cached in objective_cache as they're not used by the GUI
             
             return ct_templates
             
@@ -2808,7 +3042,7 @@ class BmsInjectionWindow(tk.Toplevel):
         logger.info(f"Found ObjectiveRelatedData directory at: {obj_related_data_dir}")
         
         # Define the task that will run in the background with processing window
-        def objective_template_generation_task():
+        def objective_template_generation_task(processing_window):
             # Parse the CT file with error handling
             try:
                 ct_tree = ET.parse(self.injector.ct_file)
@@ -2994,6 +3228,11 @@ class BmsInjectionWindow(tk.Toplevel):
                 # Update the injector's templates if available
                 if hasattr(self.injector, 'objective_templates'):
                     self.injector.objective_templates = objective_templates
+
+                # Update the objective cache with the new templates
+                from components.objective_cache import cache as objective_cache
+                objective_cache.set_objective_templates(objective_templates)
+                objective_cache.save_cache()
             except Exception as save_error:
                 error_msg = f"Error saving objective templates: {save_error}"
                 logger.error(error_msg)

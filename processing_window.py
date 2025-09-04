@@ -16,6 +16,7 @@ class ProcessType(Enum):
     """Enum of process types that can use the ProcessingWindow"""
     OBJECTIVE_TEMPLATE_GENERATION = "objective_template_generation"
     CT_TEMPLATE_GENERATION = "ct_template_generation"
+    CALCULATE_DEFAULT_VALUES = "calculate_default_values"
 
 
 class ProcessingWindow:
@@ -138,6 +139,8 @@ class ProcessingWindow:
                 details_title = "Objective Template Generation Progress"
             elif self.process_type == ProcessType.CT_TEMPLATE_GENERATION:
                 details_title = "CT Template Generation Progress"
+            elif self.process_type == ProcessType.CALCULATE_DEFAULT_VALUES:
+                details_title = "Calculating Default Values Progress"
             else:
                 details_title = "Processing Details"
                 
@@ -531,6 +534,9 @@ def create_template_generation_window(parent, process_type, title=None, message=
     elif process_type == ProcessType.CT_TEMPLATE_GENERATION:
         default_title = "Generating CT Templates"
         default_message = "Generating CT templates"
+    elif process_type == ProcessType.CALCULATE_DEFAULT_VALUES:
+        default_title = "Calculating Default Values"
+        default_message = "Calculating median values from existing objectives"
     else:
         default_title = "Processing"
         default_message = "Please wait..."
@@ -576,6 +582,9 @@ def run_template_generation(parent, task_function, process_type, title=None, mes
     elif process_type == ProcessType.CT_TEMPLATE_GENERATION:
         default_title = "Generating CT Templates"
         default_message = "Generating CT templates..."
+    elif process_type == ProcessType.CALCULATE_DEFAULT_VALUES:
+        default_title = "Calculating Default Values"
+        default_message = "Calculating median values from existing objectives..."
     else:
         default_title = "Processing"
         default_message = "Please wait..."

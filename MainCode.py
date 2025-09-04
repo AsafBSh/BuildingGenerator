@@ -273,8 +273,9 @@ def Show_Selected_Features_2D(
             entry_parts = entry.split()
             ct_number = int(re.search(r"\d+", entry_parts[0]).group())
             
-            # Find model data
-            model_data = models_data[models_data["CTNumber"].astype(str).str.contains(str(ct_number))]
+            # Find model data - match CTNumber exactly to avoid substring collisions (e.g., 88 matching 886)
+            ct_series_2d = pd.to_numeric(models_data["CTNumber"], errors="coerce")
+            model_data = models_data[ct_series_2d == ct_number]
             if model_data.empty:
                 continue
                 
@@ -454,10 +455,9 @@ def Show_Selected_Features_3D(
             entry_parts = entry.split()
             ct_number = int(re.search(r"\d+", entry_parts[0]).group())
             
-            # Find model data
-            model_data = models_FrameData[
-                models_FrameData["CTNumber"].astype(str).str.contains(str(ct_number))
-            ]
+            # Find model data - match CTNumber exactly to avoid substring collisions
+            ct_series_3d = pd.to_numeric(models_FrameData["CTNumber"], errors="coerce")
+            model_data = models_FrameData[ct_series_3d == ct_number]
             if model_data.empty:
                 continue
                 
@@ -1301,12 +1301,14 @@ def Save_random_features(
     sort_option,
     shared_data_dict,  # Added shared_data_dict parameter
     CT_Num=None,
-    Obj_Num=None
+    Obj_Num=None,
+    selection_type="Random Selection"  # Added to control collision detection
 ):
     # Log only critical information
-    logger.info(f"Save_random_features: {SaveType} mode, {num_features} features")
+    logger.info(f"Save_random_features: {SaveType} mode, {num_features} features, selection_type={selection_type}")
     if CT_Num is not None and Obj_Num is not None:
         logger.info(f"BMS Injection: CT={CT_Num}, Obj={Obj_Num}")
+        logger.info(f"Collision detection will be {'ENABLED' if selection_type == 'Random Selection' else 'DISABLED'} for {selection_type} mode")
     feature_entries = []
     feature_types = []
 
@@ -1484,13 +1486,33 @@ def Save_random_features(
                 logger.info(f"DEBUG: Feature entries sample (first 3): {feature_entries[:3] if len(feature_entries) >= 3 else feature_entries}")
                 
                 try:
-                    injection_result = injector.create_and_inject_objective(Obj_Num, CT_Num, name, obj_type, feature_entries, selected_data, fields, reset_pd)
+                    injection_result = injector.create_and_inject_objective(Obj_Num, CT_Num, name, obj_type, feature_entries, selected_data, fields, reset_pd, selection_type)
                     logger.info(f"DEBUG: Injection result: {injection_result}")
                     
-                    if injection_result:
+                    # Check if injection was successful (not cancelled or error)
+                    if isinstance(injection_result, dict) and injection_result.get("status") == "success":
                         # Success - just update statistics without showing a message
                         # as the calling function will display a success message
                         logger.info("DEBUG: Injection successful, updating statistics")
+                        try:
+                            update_statistics(num_features, feature_types)
+                            logger.info("DEBUG: Statistics updated successfully")
+                        except Exception as e:
+                            logger.error(f"DEBUG: Error updating statistics: {e}")
+                    elif isinstance(injection_result, dict) and injection_result.get("status") == "cancelled":
+                        # User cancelled - log and return without doing anything
+                        logger.info(f"DEBUG: Injection cancelled by user: {injection_result.get('reason', 'unknown')}")
+                        return []  # Return empty list to indicate no features were processed
+                    elif isinstance(injection_result, dict) and injection_result.get("status") == "error":
+                        # Error occurred - log and show error message
+                        error_msg = injection_result.get("message", "Unknown error occurred")
+                        logger.error(f"DEBUG: Injection failed: {error_msg}")
+                        messagebox.showerror("BMS Injection Error", f"Failed to inject features: {error_msg}")
+                        return []  # Return empty list to indicate no features were processed
+                    elif injection_result:  # Backwards compatibility for old boolean returns
+                        # Success - just update statistics without showing a message
+                        # as the calling function will display a success message
+                        logger.info("DEBUG: Injection successful (legacy boolean), updating statistics")
                         try:
                             update_statistics(num_features, feature_types)
                             logger.info("DEBUG: Statistics updated successfully")
@@ -1572,12 +1594,14 @@ def Assign_features_accuratly(
         return TypeError
 
     # Apply Structure selection algorithm through preferences -                     "size", "closer", "both", "random"
+    logger.debug(f"Assign_features_accuratly: Applying filter_structures with {len(GeoFeatures)} input features, requesting {num_features}, using filter '{fillter_option}'")
     Selected_GeoFeatures, Selected_CalcData_GeoFeatures = filter_structures(
         pd.DataFrame(CalcData_GeoFeatures),
         pd.DataFrame(GeoFeatures),
         num_features,
         fillter_option,
     )
+    logger.debug(f"Assign_features_accuratly: filter_structures returned {len(Selected_GeoFeatures)} features")
     Selected_CalcData_GeoFeatures = np.array(Selected_CalcData_GeoFeatures)
 
     return AllBMSModels, Selected_GeoFeatures, Selected_CalcData_GeoFeatures
@@ -1605,16 +1629,27 @@ def Save_accurate_features(
     shared_data_dict,  # Added shared_data_dict parameter
     CT_Num=None,
     Obj_Num=None,
+    selection_type="GeoJson"  # Added to control collision detection
 ):
     # Seed the random number generator for reproducibility
     np.random.seed(int(time.time()))
+    
+    # DEBUG: Log all important parameters received
+    logger.debug(f"Save_accurate_features called with SaveType='{SaveType}', num_features={num_features}, auto_features_detection={auto_features_detection}, selection_type={selection_type}")
+    logger.debug(f"Save_accurate_features: selection_option='{selection_option}', floor_height={floor_height}, num_floors={num_floors}")
+    logger.debug(f"Save_accurate_features: AllBMSModels has {len(AllBMSModels)} models, Selected_GeoFeatures has {len(Selected_GeoFeatures)} features")
+    if SaveType == "BMS":
+        logger.info(f"BMS Injection: Collision detection will be {'ENABLED' if selection_type == 'Random Selection' else 'DISABLED'} for {selection_type} mode")
+    logger.debug(f"Save_accurate_features: Values_f={Values_f}, Values_i={Values_i}, Presence_f={Presence_f}, Presence_i={Presence_i}")
 
     #  initialize lists
     feature_entries = []
     feature_types = []
 
-    # Iterate through each selected geographic feature
-    for select in range(len(Selected_GeoFeatures)):
+    # Iterate through each selected geographic feature (LIMITED BY num_features)
+    features_to_process = min(num_features, len(Selected_GeoFeatures))
+    logger.info(f"Processing {features_to_process} features (requested: {num_features}, available: {len(Selected_GeoFeatures)})")
+    for select in range(features_to_process):
         # Auto-select BMS models if enabled
         Auto_BMSModels = (
             Auto_Selected(Db_path, Selected_GeoFeatures.iloc[select])
@@ -1622,6 +1657,14 @@ def Save_accurate_features(
             else None
         )
         Models = Auto_BMSModels if Auto_BMSModels is not None else AllBMSModels
+        
+        # DEBUG: Log auto selection and model info
+        if auto_features_detection:
+            logger.info(f"Feature {select}: Auto_BMSModels = {Auto_BMSModels.shape if Auto_BMSModels is not None else None}")
+            logger.info(f"Feature {select}: Using {'auto-selected' if Auto_BMSModels is not None else 'all'} models ({len(Models)} models)")
+            if Auto_BMSModels is None:
+                logger.warning(f"Feature {select}: AUTO SELECTION FAILED - falling back to ALL {len(AllBMSModels)} models")
+        logger.info(f"Feature {select}: Decision_Algo parameters - selection_option='{selection_option}', floor_height={floor_height}, num_floors={num_floors}")
 
         # Use Decision_Algo to find the best model
         corrent_model_idx, closest_distance = Decision_Algo(
@@ -1636,6 +1679,7 @@ def Save_accurate_features(
 
         # Extract model information
         model = Models.iloc[corrent_model_idx]
+        logger.debug(f"Feature {select}: Decision_Algo selected model CT#{model['CTNumber']} '{model['FeatureName']}' (distance: {closest_distance:.2f})")
         ct_number, feature_name = model["CTNumber"], model["FeatureName"]
         
         # Apply Rotation_Definer to handle rotation based on LengthIdx
@@ -1686,6 +1730,9 @@ def Save_accurate_features(
         feature_entries.append(formatted_entry)
         feature_types.append(model["Type"])
 
+    # Log final feature count to verify the fix worked
+    logger.debug(f"Generated {len(feature_entries)} feature entries (limit was {num_features})")
+    
     # Sort feature entries if required
     if sort_option != "None":
         feature_entries = sort_feature_entries(feature_entries, sort_option)
@@ -1813,7 +1860,30 @@ def Save_accurate_features(
                 injector = BmsInjector(bms_path, backup=backup_bms_files)
                 
                 # Create objective and inject features in one operation
-                if injector.create_and_inject_objective(Obj_Num, CT_Num, name, obj_type, feature_entries, AllBMSModels, fields, reset_pd):
+                injection_result = injector.create_and_inject_objective(Obj_Num, CT_Num, name, obj_type, feature_entries, AllBMSModels, fields, reset_pd, selection_type)
+                
+                # Check if injection was successful (not cancelled or error)
+                if isinstance(injection_result, dict) and injection_result.get("status") == "success":
+                    # Success - just update statistics without showing a message
+                    # as the calling function will display a success message
+                    update_statistics(num_features, feature_types)
+                
+                    # Clean up temporary files after successful operation
+                    injector.cleanup_temp_files(Obj_Num)
+                    
+                    # Don't create files in the Generated folder for successful BMS injections
+                    return feature_entries
+                elif isinstance(injection_result, dict) and injection_result.get("status") == "cancelled":
+                    # User cancelled - log and return without doing anything
+                    logger.info(f"BMS injection cancelled by user: {injection_result.get('reason', 'unknown')}")
+                    return []  # Return empty list to indicate no features were processed
+                elif isinstance(injection_result, dict) and injection_result.get("status") == "error":
+                    # Error occurred - show error message
+                    error_msg = injection_result.get("message", "Unknown error occurred")
+                    logger.error(f"BMS injection failed: {error_msg}")
+                    messagebox.showerror("BMS Injection Error", f"Failed to inject features: {error_msg}")
+                    return []  # Return empty list to indicate no features were processed
+                elif injection_result:  # Backwards compatibility for old boolean returns
                     # Success - just update statistics without showing a message
                     # as the calling function will display a success message
                     update_statistics(num_features, feature_types)
@@ -2156,7 +2226,10 @@ def load_statistics():
 
 def Auto_Selected(Db_path, Selected_GeoFeature):
     """The function detects possible keys in the GeoFeature and loading a proper Models from the Database for better type fitting"""
-    logger.debug(f"Auto_Selected called with GeoFeature keys: {list(Selected_GeoFeature.keys())}")
+    logger.info(f"Auto_Selected DEBUG: Feature keys available: {list(Selected_GeoFeature.keys())}")
+    logger.info(f"Auto_Selected DEBUG: building='{Selected_GeoFeature.get('building', 'NOT_FOUND')}', leisure='{Selected_GeoFeature.get('leisure', 'NOT_FOUND')}', amenity='{Selected_GeoFeature.get('amenity', 'NOT_FOUND')}'")
+    logger.info(f"Auto_Selected DEBUG: man_made='{Selected_GeoFeature.get('man_made', 'NOT_FOUND')}', military='{Selected_GeoFeature.get('military', 'NOT_FOUND')}', bms='{Selected_GeoFeature.get('bms', 'NOT_FOUND')}'")
+    logger.info(f"Auto_Selected DEBUG: Full feature data sample: {dict(list(Selected_GeoFeature.items())[:10])}")
     
     fillters = []
 
@@ -2410,6 +2483,7 @@ def Auto_Selected(Db_path, Selected_GeoFeature):
             Accurate_filltered_BMSmodels = Load_Db(Db_path, filters_str)
             if not Accurate_filltered_BMSmodels.empty:
                 logger.info(f"Auto_Selected found {len(Accurate_filltered_BMSmodels)} matching BMS models using {len(fillters)} filters")
+                logger.debug(f"Auto_Selected: Filtered models CT numbers: {Accurate_filltered_BMSmodels['CTNumber'].tolist()}")
                 return Accurate_filltered_BMSmodels
             else:
                 logger.warning(f"Auto_Selected: No BMS models found matching filters: {filters_str}")
@@ -2419,6 +2493,7 @@ def Auto_Selected(Db_path, Selected_GeoFeature):
             return None
     else:
         logger.info("Auto_Selected: No applicable filters found for the given GeoFeature")
+        logger.debug(f"Auto_Selected: Feature has no matching filters - falling back to AllBMSModels")
         return None
 
 def split_string(s):

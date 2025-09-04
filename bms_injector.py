@@ -716,8 +716,7 @@ class BmsInjector:
                 # Store the median template
                 template_medians[str(obj_type)] = median_template
             
-            # Store templates in cache
-            objective_cache.set_objective_templates(template_medians)
+            # Update in-memory templates only; do not modify cache here
             self.objective_templates = template_medians
             
             logger.info(f"Analyzed {len(obj_data)} objectives and created {len(template_medians)} templates")
@@ -1622,15 +1621,18 @@ class BmsInjector:
             reset_pd (bool): Whether to reset PHD and PDX files
             
         Returns:
-            bool: True if successful, False otherwise
+            dict: Result dictionary with status and details
         """
         # Validate and convert objective type
         try:
             obj_type = int(obj_type)  # Convert to int to ensure it's a valid number
             logger.info(f"Creating objective {obj_num} with type {obj_type}")
         except (ValueError, TypeError):
-            logger.error(f"Invalid objective type: {obj_type}, must be a number")
-            return False
+            error_msg = f"Invalid objective type: {obj_type}, must be a number"
+            logger.error(error_msg)
+            return {"status": "error", "message": error_msg}
+        
+        # Note: Overwrite confirmation is handled in MainCode.py before this method is called
             
         # Format objective number with leading zeros
         obj_num_str = f"{obj_num:05d}"
@@ -1673,38 +1675,47 @@ class BmsInjector:
         
         # Create OCD file and its temp copy
         ocd_file = self.objective_dir / f"OCD_{obj_num_str}.XML"
-        tmp_ocd_file = tmp_dir / f"OCD_{obj_num_str}.XML"
         success = self._create_ocd_file(ocd_file, obj_num, ct_num, name, combined_fields)
-        self._create_ocd_file(tmp_ocd_file, obj_num, ct_num, name, combined_fields)
+        # Create a copy in the Generated folder if backup_features is enabled
+        if self.backup_features and tmp_dir is not None:
+            tmp_ocd_file = tmp_dir / f"OCD_{obj_num_str}.XML"
+            self._create_ocd_file(tmp_ocd_file, obj_num, ct_num, name, combined_fields)
         
         if not success:
-            logger.error(f"Failed to create OCD file for objective {obj_num}")
-            return False
+            error_msg = f"Failed to create OCD file for objective {obj_num}"
+            logger.error(error_msg)
+            return {"status": "error", "message": error_msg, "obj_num": obj_num}
         
         # Create/reset PHD and PDX files if requested
         if reset_pd:
             pdx_file = self.objective_dir / f"PDX_{obj_num_str}.XML"
             phd_file = self.objective_dir / f"PHD_{obj_num_str}.XML"
-            tmp_pdx_file = tmp_dir / f"PDX_{obj_num_str}.XML"
-            tmp_phd_file = tmp_dir / f"PHD_{obj_num_str}.XML"
+
             
-            self._create_pd_file(pdx_file, "PDXRecords", "PD")
+            self._create_pd_file(pdx_file, "PDRecords", "PD")
             self._create_pd_file(phd_file, "PHDRecords", "PHD")
-            self._create_pd_file(tmp_pdx_file, "PDXRecords", "PD")
-            self._create_pd_file(tmp_phd_file, "PHDRecords", "PHD")
+            # Create copies in the Generated folder if backup_features is enabled
+            if self.backup_features and tmp_dir is not None:
+                tmp_pdx_file = tmp_dir / f"PDX_{obj_num_str}.XML"
+                tmp_phd_file = tmp_dir / f"PHD_{obj_num_str}.XML"
+                self._create_pd_file(tmp_pdx_file, "PDRecords", "PD")
+                self._create_pd_file(tmp_phd_file, "PHDRecords", "PHD")
         
         # Create empty FED file ready for injection
         fed_file = self.objective_dir / f"FED_{obj_num_str}.XML"
-        tmp_fed_file = tmp_dir / f"FED_{obj_num_str}.XML"
         self._create_fed_file(fed_file)
-        self._create_fed_file(tmp_fed_file)
+        # Create a copy in the Generated folder if backup_features is enabled
+        if self.backup_features and tmp_dir is not None:
+            tmp_fed_file = tmp_dir / f"FED_{obj_num_str}.XML"
+            self._create_fed_file(tmp_fed_file)
         
         # Update CT file with objective data, but don't create another backup
         # Pass obj_num to properly set the EntityIdx in the CT file
         ct_success = self._update_ct_file(ct_num, obj_type, name, backup=False, obj_num=obj_num)
         if not ct_success:
-            logger.warning(f"Failed to update CT file for objective {obj_num}")
-            return False
+            error_msg = f"Failed to update CT file for objective {obj_num}"
+            logger.warning(error_msg)
+            return {"status": "error", "message": error_msg, "obj_num": obj_num}
             
         # Verify the CT file was updated with the correct type
         try:
@@ -1732,7 +1743,13 @@ class BmsInjector:
         except Exception as e:
             logger.error(f"Error verifying CT file update: {e}")
         
-        return True
+        # Operation completed successfully
+        return {
+            "status": "success", 
+            "message": f"Successfully created objective {obj_num}",
+            "obj_num": obj_num,
+            "ct_num": ct_num
+        }
 
     def _create_ocd_file(self, filepath, obj_num, ct_num, name, fields):
         """
@@ -1881,7 +1898,7 @@ class BmsInjector:
             skip_backup (bool): Whether to skip backing up objective files (default: False)
             
         Returns:
-            bool: True if successful, False otherwise
+            dict: Result dictionary with status and details
         """
         obj_num_str = f"{obj_num:05d}"
         obj_dir = self.objective_dir / f"OCD_{obj_num_str}"
@@ -1889,8 +1906,9 @@ class BmsInjector:
         
         # Check if objective exists
         if not obj_dir.exists() or not fed_file.exists():
-            logger.error(f"Objective directory or FED file does not exist: {obj_dir}")
-            return False
+            error_msg = f"Objective directory or FED file does not exist: {obj_dir}"
+            logger.error(error_msg)
+            return {"status": "error", "message": error_msg, "obj_num": obj_num}
         
         # Backup objective files before modifying only if backups are enabled and not skipped
         if self.backup and not skip_backup:
@@ -1940,10 +1958,17 @@ class BmsInjector:
                         f.write(f"{feature}\n")
                 logger.info(f"Created feature backups in {tmp_dir}")
                     
-            return True
+            # Operation completed successfully
+            return {
+                "status": "success", 
+                "message": f"Successfully injected {len(features)} features into objective {obj_num}",
+                "obj_num": obj_num,
+                "feature_count": len(features)
+            }
             
         except Exception as e:
-            logger.error(f"Error injecting features: {e}")
+            error_msg = f"Error injecting features: {e}"
+            logger.error(error_msg)
             # Try to save features to tmp file even if injection failed, but only if backup_features is enabled
             if self.backup_features and tmp_dir is not None:
                 try:
@@ -1954,7 +1979,7 @@ class BmsInjector:
                             f.write(f"{feature}\n")
                 except Exception:
                     pass
-            return False
+            return {"status": "error", "message": error_msg, "obj_num": obj_num}
     
     def process_features_with_collision_detection(self, features, models_data):
         """
@@ -2099,79 +2124,39 @@ class BmsInjector:
         
     def _add_fed_entry(self, root, index, feature_entry, models_data):
         """
-        Add a FED entry from a feature entry.
-        
-        Args:
-            root (Element): FEDRecords root element
-            index (int): Feature index
-            feature_entry (str): Feature entry string
-            models_data (DataFrame): DataFrame with model information
+        Add a FED entry from a feature entry without re-validating against the database.
+        It trusts that the feature_entry string is already correct.
         """
-        # Parse feature entry - format is like:
-        # FeatureEntry=CT_NUM Y_DIST X_DIST Z_DIST ROTATION VALUE FLAGS CAMPAIGN PRESENCE# INDEX) NAME
-        parts = feature_entry.split()
-        ct_number = int(parts[0].split('=')[1])
-        y_dist, x_dist, z_dist, rotation = map(float, parts[1:5])
-        
-        # Find the row in models_data with this CT number
-        model_rows = models_data[models_data["CTNumber"] == ct_number]
-        if model_rows.empty:
-            logger.warning(f"No model data found for CT {ct_number}")
-            return
+        try:
+            # Parse feature entry - format is like:
+            # FeatureEntry=CT_NUM Y_DIST X_DIST Z_DIST ROTATION VALUE FLAGS CAMPAIGN PRESENCE# INDEX) NAME
+            parts = feature_entry.split()
+            ct_number = int(parts[0].split('=')[1])
+            y_dist, x_dist, z_dist, rotation = map(float, parts[1:5])
             
-        # Get the model type for this feature (if available)
-        model_type = None
-        if not model_rows.empty and "Type" in model_rows.columns:
-            model_type = int(model_rows.iloc[0]["Type"])
-            logger.debug(f"Model type for CT {ct_number} is {model_type}")
-        
-        # Create the FED element
-        fed = ET.SubElement(root, "FED", Num=str(index))
-        
-        # Add required fields
-        ct_idx = ET.SubElement(fed, "FeatureCtIdx")
-        ct_idx.text = str(ct_number)
-        
-        # Add the Value field right after FeatureCtIdx
-        value_elem = ET.SubElement(fed, "Value")
-        # Extract the value from the feature entry (it's the 6th element in parts array, index 5)
-        if len(parts) > 5:  # Make sure we have enough parts
-            # The value is formatted as a 4-digit integer in the feature entry
-            # We need to extract the numeric value and remove any leading zeros
-            try:
-                raw_value = parts[5]  # VALUE is at index 5
-                logger.debug(f"Raw value from feature entry for CT {ct_number}: '{raw_value}'")
+            # Create the FED element
+            fed = ET.SubElement(root, "FED", Num=str(index))
+            
+            # Add required fields
+            ET.SubElement(fed, "FeatureCtIdx").text = str(ct_number)
+            
+            # Add the Value field
+            value_elem = ET.SubElement(fed, "Value")
+            if len(parts) > 5:
+                value_elem.text = str(int(parts[5]))
+            else:
+                value_elem.text = "0"
+            
+            ET.SubElement(fed, "OffsetX").text = f"{x_dist:.3f}"
+            ET.SubElement(fed, "OffsetY").text = f"{y_dist:.3f}"
+            ET.SubElement(fed, "OffsetZ").text = f"{z_dist:.3f}"
+            ET.SubElement(fed, "Heading").text = f"{rotation:.1f}"
+            
+            return True  # Return True when entry is successfully added
 
-                numeric_value = int(raw_value)  # Convert to int to remove any formatting
-                
-                # Debug logging to check if the right value is being extracted
-                value_elem.text = str(numeric_value)  # Convert back to string for XML
-                logger.info(f"Added Value={numeric_value} to FED entry for CT {ct_number}")
-                
-                # Additional debug output with full feature entry for diagnostics
-                logger.debug(f"Full feature entry for CT {ct_number}: {feature_entry}")
-            except (ValueError, IndexError) as e:
-                # No default values - raise an error
-                error_msg = f"Invalid value format in feature entry for CT {ct_number}: {e}"
-                logger.error(error_msg)
-                raise ValueError(error_msg)
-        else:
-            # No default values - if value field is missing, raise an error
-            error_msg = f"Missing value field in feature entry for CT {ct_number}"
-            logger.error(error_msg)
-            raise ValueError(error_msg)
-        
-        offset_x = ET.SubElement(fed, "OffsetX")
-        offset_x.text = f"{x_dist:.3f}"
-        
-        offset_y = ET.SubElement(fed, "OffsetY")
-        offset_y.text = f"{y_dist:.3f}"
-        
-        offset_z = ET.SubElement(fed, "OffsetZ")
-        offset_z.text = f"{z_dist:.3f}"
-        
-        heading = ET.SubElement(fed, "Heading")
-        heading.text = f"{rotation:.1f}"
+        except (ValueError, IndexError) as e:
+            logger.error(f"Failed to parse feature entry: '{feature_entry}'. Error: {e}")
+            return False
     
     def cleanup_temp_files(self, obj_num):
         """
@@ -2594,7 +2579,7 @@ class BmsInjector:
         # Return final collision result and score
         return has_collision, max_overlap_ratio
     
-    def create_and_inject_objective(self, obj_num, ct_num, name, obj_type, features, models_data, fields=None, reset_pd=True):
+    def create_and_inject_objective(self, obj_num, ct_num, name, obj_type, features, models_data, fields=None, reset_pd=True, selection_type="GeoJson"):
         """
         Create or update an objective and inject features in a single operation with one backup.
         
@@ -2607,9 +2592,10 @@ class BmsInjector:
             models_data (DataFrame): DataFrame with model information
             fields (dict): Field values for the objective
             reset_pd (bool): Whether to reset PHD and PDX files
+            selection_type (str): Type of selection ("GeoJson" or "Random Selection")
             
         Returns:
-            bool: True if successful, False otherwise
+            dict: Result dictionary with status and details
         """
         # Validate and convert objective type
         try:
@@ -2617,8 +2603,11 @@ class BmsInjector:
             logger.info(f"Creating objective {obj_num} with type {obj_type}")
             logger.debug(f"BmsInjector creating objective {obj_num} with type {obj_type}")
         except (ValueError, TypeError):
-            logger.error(f"Invalid objective type: {obj_type}, must be a number")
-            return False
+            error_msg = f"Invalid objective type: {obj_type}, must be a number"
+            logger.error(error_msg)
+            return {"status": "error", "message": error_msg}
+        
+        # Note: Overwrite confirmation is handled in MainCode.py before this method is called
             
         # Format objective number with leading zeros
         obj_num_str = f"{obj_num:05d}"
@@ -2627,14 +2616,19 @@ class BmsInjector:
         obj_dir = self.objective_dir / f"OCD_{obj_num_str}"
         creating = not obj_dir.exists()
         
+        # At this point, all confirmations are complete - proceed with operation
         # Only create backups if the backup setting is enabled
         if self.backup:
             # Create a backup of the CT file (only once)
-            self._backup_ct_file()
+            backup_result = self._backup_ct_file()
+            if backup_result is None and self.backup:
+                logger.warning("Failed to create CT file backup but proceeding with operation")
             
             # If updating an existing objective, backup its files first (only once)
             if not creating:
-                self._backup_objective_files(obj_num)
+                backup_result = self._backup_objective_files(obj_num)
+                if backup_result is None and self.backup:
+                    logger.warning(f"Failed to create objective {obj_num} backup but proceeding with operation")
         else:
             logger.debug(f"Skipping backups due to disabled backup setting")
 
@@ -2683,21 +2677,22 @@ class BmsInjector:
             self._create_ocd_file(tmp_ocd_file, obj_num, ct_num, name, combined_fields)
         
         if not success:
-            logger.error(f"Failed to create OCD file for objective {obj_num}")
-            return False
+            error_msg = f"Failed to create OCD file for objective {obj_num}"
+            logger.error(error_msg)
+            return {"status": "error", "message": error_msg, "obj_num": obj_num}
         
         # Create/reset PHD and PDX files if requested
         if creating or reset_pd:
             pdx_file = obj_dir / f"PDX_{obj_num_str}.XML"
             phd_file = obj_dir / f"PHD_{obj_num_str}.XML"
             
-            self._create_pd_file(pdx_file, "PDXRecords", "PD")
+            self._create_pd_file(pdx_file, "PDRecords", "PD")
             self._create_pd_file(phd_file, "PHDRecords", "PHD")
             # Create copies in the Generated folder if backup_features is enabled
             if self.backup_features and tmp_dir is not None:
                 tmp_pdx_file = tmp_dir / f"PDX_{obj_num_str}.XML"
                 tmp_phd_file = tmp_dir / f"PHD_{obj_num_str}.XML"
-                self._create_pd_file(tmp_pdx_file, "PDXRecords", "PD")
+                self._create_pd_file(tmp_pdx_file, "PDRecords", "PD")
                 self._create_pd_file(tmp_phd_file, "PHDRecords", "PHD")
         
         # Create empty FED file ready for injection
@@ -2711,8 +2706,9 @@ class BmsInjector:
         # Update CT file with objective data, but don't create another backup
         # Pass obj_num to properly set the EntityIdx in the CT file
         if not self._update_ct_file(ct_num, obj_type, name, backup=False, obj_num=obj_num):
-            logger.warning(f"Failed to update CT file for objective {obj_num}")
-            return False
+            error_msg = f"Failed to update CT file for objective {obj_num}"
+            logger.warning(error_msg)
+            return {"status": "error", "message": error_msg, "obj_num": obj_num}
         
         # Verify the CT file was updated with the correct type
         try:
@@ -2742,10 +2738,17 @@ class BmsInjector:
         
         # Then inject features without creating another backup
         try:
-            # Process features with collision detection to avoid overlaps
-            logger.info(f"Processing {len(features)} features with collision detection")
-            processed_features = self.process_features_with_collision_detection(features, models_data)
-            logger.info(f"Processed {len(processed_features)} features with collision detection")
+            # Conditional collision detection based on selection type
+            if selection_type == "Random Selection":
+                # Apply collision detection for random placement
+                logger.info(f"Processing {len(features)} features with collision detection (Random Selection mode)")
+                processed_features = self.process_features_with_collision_detection(features, models_data)
+                logger.info(f"Processed {len(processed_features)} features with collision detection")
+            else:
+                # Preserve original coordinates for GeoJson placement
+                logger.info(f"Processing {len(features)} features while preserving original coordinates (GeoJson mode)")
+                processed_features = features  # Use features as-is without coordinate modification
+                logger.info(f"Processed {len(processed_features)} features while preserving original coordinates")
             
             # Parse existing FED file
             tree = ET.parse(str(fed_file))
@@ -2775,10 +2778,18 @@ class BmsInjector:
             else:
                 logger.debug("Skipping feature backup due to disabled backup_features setting")
                     
-            return True
+            # Operation completed successfully
+            return {
+                "status": "success", 
+                "message": f"Successfully created and injected objective {obj_num}",
+                "obj_num": obj_num,
+                "ct_num": ct_num,
+                "feature_count": len(processed_features)
+            }
         except Exception as e:
-            logger.error(f"Error injecting features: {e}")
-            return False
+            error_msg = f"Error injecting features: {e}"
+            logger.error(error_msg)
+            return {"status": "error", "message": error_msg, "obj_num": obj_num}
 
 if __name__ == "__main__":
     # Test code

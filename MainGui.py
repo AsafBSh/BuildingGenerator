@@ -89,6 +89,10 @@ class MainPage(tk.Tk):
         
         # Initialize Auto_Load attribute for settings window integration
         self.Auto_Load = tk.BooleanVar(value=False)
+        
+        # Initialize destruction state tracking
+        self._destroying = False
+        self._child_windows = set()  # Track child windows
 
         self.frames = {}
         for F in (DashboardPage, DatabasePage, GeoDataPage, OperationPage):
@@ -101,7 +105,7 @@ class MainPage(tk.Tk):
             frame.grid(row=0, column=0, sticky="nsew")
 
         # Set Name and Icon and version
-        self.shared_data["BuildingGeneratorVer"].set("Building Generator v1.6")
+        self.shared_data["BuildingGeneratorVer"].set("Building Generator v1.7")
         self.title(self.shared_data["BuildingGeneratorVer"].get())
         self.iconbitmap("Assets/icon_128.ico")
 
@@ -109,6 +113,9 @@ class MainPage(tk.Tk):
         self.show_frame("DashboardPage")
         # Startup check loading
         self.startup_definition()
+        
+        # Set up window close protocol
+        self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
     def show_frame(self, page_name):
         # Hide all frames
@@ -325,6 +332,9 @@ class MainPage(tk.Tk):
             editor_extraction_path=editor_path
         )
         
+        # Register the child window for proper cleanup
+        self.register_child_window(settings_window)
+        
         # Ensure Auto-Start checkbox state matches shared data
         startup_value = self.shared_data["Startup"].get()
         # Set our own Auto_Load value based on the Startup shared data
@@ -334,8 +344,12 @@ class MainPage(tk.Tk):
         if hasattr(settings_window, 'auto_start_var'):
             settings_window.auto_start_var.set(startup_value == "1")
         
-        # Bind the window's "destroy" event to re-enable settings button
-        settings_window.bind("<Destroy>", self.enable_Settings_button)
+        # Bind the window's "destroy" event to re-enable settings button and unregister
+        def on_settings_destroy(event):
+            self.unregister_child_window(settings_window)
+            self.enable_Settings_button(event)
+        
+        settings_window.bind("<Destroy>", on_settings_destroy)
         
         return settings_window
 
@@ -479,14 +493,54 @@ class MainPage(tk.Tk):
             logging.error(traceback.format_exc())
 
     def enable_Settings_button(self, event):
-        # Enable the settings button in all pages
-        for Page in ("DashboardPage", "DatabasePage", "GeoDataPage", "OperationPage"):
-            self.frames[Page].button_settings.configure(state="normal")
+        """Enable the settings button in all pages, with safe destruction handling."""
+        try:
+            # Skip if window is being destroyed
+            if hasattr(self, '_destroying') and self._destroying:
+                return
+                
+            # Enable the settings button in all pages
+            for Page in ("DashboardPage", "DatabasePage", "GeoDataPage", "OperationPage"):
+                try:
+                    # Check if frame exists and widget is still valid
+                    if (Page in self.frames and 
+                        hasattr(self.frames[Page], 'button_settings') and
+                        self.frames[Page].button_settings.winfo_exists()):
+                        self.frames[Page].button_settings.configure(state="normal")
+                except tk.TclError as e:
+                    # Widget has been destroyed, skip it
+                    logging.debug(f"Widget {Page}.button_settings destroyed during enable: {e}")
+                    continue
+                except Exception as e:
+                    logging.warning(f"Error enabling settings button for {Page}: {e}")
+                    continue
+        except Exception as e:
+            logging.error(f"Error in enable_Settings_button: {e}")
 
     def disable_Settings_buttons(self):
-        # Disable the settings button in all pages
-        for Page in ("DashboardPage", "DatabasePage", "GeoDataPage", "OperationPage"):
-            self.frames[Page].button_settings.configure(state="disabled")
+        """Disable the settings button in all pages, with safe destruction handling."""
+        try:
+            # Skip if window is being destroyed
+            if hasattr(self, '_destroying') and self._destroying:
+                return
+                
+            # Disable the settings button in all pages
+            for Page in ("DashboardPage", "DatabasePage", "GeoDataPage", "OperationPage"):
+                try:
+                    # Check if frame exists and widget is still valid
+                    if (Page in self.frames and 
+                        hasattr(self.frames[Page], 'button_settings') and
+                        self.frames[Page].button_settings.winfo_exists()):
+                        self.frames[Page].button_settings.configure(state="disabled")
+                except tk.TclError as e:
+                    # Widget has been destroyed, skip it
+                    logging.debug(f"Widget {Page}.button_settings destroyed during disable: {e}")
+                    continue
+                except Exception as e:
+                    logging.warning(f"Error disabling settings button for {Page}: {e}")
+                    continue
+        except Exception as e:
+            logging.error(f"Error in disable_Settings_buttons: {e}")
 
     def save_config_file(self):
         """Check if Configuration file exists, and Save it when "save" button is clicked"""
@@ -841,6 +895,55 @@ class MainPage(tk.Tk):
         except Exception as e:
             # Log the error but don't show a message box as this happens at startup
             logging.error(f"Error loading startup configuration: {str(e)}")
+
+    def on_closing(self):
+        """Handle application closing with proper cleanup."""
+        try:
+            # Set destruction flag to prevent further operations
+            self._destroying = True
+            
+            # Close all child windows first
+            self._close_all_child_windows()
+            
+            # Perform any other cleanup if needed
+            logging.info("Application closing...")
+            
+            # Finally destroy the main window
+            self.destroy()
+        except Exception as e:
+            logging.error(f"Error during application closing: {e}")
+            # Force destroy in case of error
+            try:
+                self.destroy()
+            except:
+                pass
+
+    def _close_all_child_windows(self):
+        """Safely close all tracked child windows."""
+        try:
+            # Make a copy of the set to avoid modification during iteration
+            child_windows_copy = self._child_windows.copy()
+            
+            for window in child_windows_copy:
+                try:
+                    if window.winfo_exists():
+                        window.destroy()
+                except Exception as e:
+                    logging.debug(f"Error closing child window: {e}")
+            
+            # Clear the set
+            self._child_windows.clear()
+        except Exception as e:
+            logging.error(f"Error closing child windows: {e}")
+
+    def register_child_window(self, window):
+        """Register a child window for proper cleanup."""
+        if not self._destroying:
+            self._child_windows.add(window)
+
+    def unregister_child_window(self, window):
+        """Unregister a child window when it's closed normally."""
+        self._child_windows.discard(window)
 
     def Get_Version_Theater_From_path(self, file_path):
         """Parse the CT XML file path to extract BMS version and theater information.
@@ -4888,7 +4991,8 @@ class OperationPage(tk.Frame):
                                     _floor_deviation,
                                     self.controller.shared_data, # Pass shared_data
                                     _ct_num,
-                                    _obj_num
+                                    _obj_num,
+                                    "GeoJson"  # selection_type parameter
                                 )
                                 
                                 # Return the result
@@ -5025,7 +5129,8 @@ class OperationPage(tk.Frame):
                                         _sorting_saving,
                                         self.controller.shared_data, # Pass shared_data
                                         _ct_num,
-                                        _obj_num
+                                        _obj_num,
+                                        "Random Selection"  # selection_type parameter
                                     )
                                     return result
                                 except Exception as e:
@@ -5043,6 +5148,7 @@ class OperationPage(tk.Frame):
                             _values = Values
                             _presence_i = Presence_i
                             _values_i = Values_i
+                            _auto_features = self.Auto_features_detector.get()  # FIX: Added missing auto features detection
                             _floor_height = floor_height
                             _floor_deviation = floor_deviation
                             
@@ -5087,7 +5193,8 @@ class OperationPage(tk.Frame):
                                         _floor_deviation,
                                         self.controller.shared_data, # Pass shared_data
                                         _ct_num,
-                                        _obj_num
+                                                                                _obj_num,
+                                        "GeoJson"  # selection_type parameter
                                     )
                                 except Exception as e:
                                     import traceback
@@ -5313,7 +5420,8 @@ class OperationPage(tk.Frame):
                                 _sorting_saving,
                                 self.controller.shared_data, # Pass shared_data
                                 None,  # CT_Num
-                                None   # Obj_Num
+                                None,  # Obj_Num
+                                "Random Selection"  # selection_type parameter
                             )
                         except Exception as e:
                             import traceback
@@ -5454,7 +5562,8 @@ class OperationPage(tk.Frame):
                                 _sorting_option,
                                 self.controller.shared_data, # Pass shared_data
                                 _ct_num,
-                                _obj_num
+                                _obj_num,
+                                "Random Selection"  # selection_type parameter
                             )
                         except Exception as e:
                             import traceback
@@ -5550,37 +5659,56 @@ class OperationPage(tk.Frame):
                 bms_path=bms_path
             )
             
+            # Register the child window for proper cleanup
+            self.controller.register_child_window(window)
+            
+            # Set up cleanup when window is destroyed
+            def on_bms_window_destroy():
+                self.controller.unregister_child_window(window)
+            
+            # Bind cleanup to window destruction
+            window.bind("<Destroy>", lambda e: on_bms_window_destroy())
+            
             # When window closes, update CT and Obj numbers if available
             self.wait_window(window)
             
             # Debug: Print if window has result attribute
             logger.debug(f"Window has result attribute: {hasattr(window, 'result')}")
             
-            if hasattr(window, 'result'):
-                # Enable the entries in case they're disabled
-                if self.textbox_CT.cget("state") == "disable":
-                    self.textbox_CT.configure(state="normal")
-                if self.textbox_Obj.cget("state") == "disable":
-                    self.textbox_Obj.configure(state="normal")
-                
-                # Update the entries with the new values
-                self.textbox_CT.delete(0, "end")
-                self.textbox_CT.insert(0, str(window.result["ct_num"]))
-                
-                self.textbox_Obj.delete(0, "end")
-                self.textbox_Obj.insert(0, str(window.result["obj_num"]))
-                
-                # If BMS mode is not active, switch to it
-                if self.saving_method_var.get() != "BMS":
-                    self.segemented_button_Saving.set("BMS")
-                    self.switch_save_method("BMS")
+            if hasattr(window, 'result') and window.result.get("status") == "success":
+                # Only update if the user successfully saved settings
+                if "ct_num" in window.result and "obj_num" in window.result:
+                    # Enable the entries in case they're disabled
+                    if self.textbox_CT.cget("state") == "disable":
+                        self.textbox_CT.configure(state="normal")
+                    if self.textbox_Obj.cget("state") == "disable":
+                        self.textbox_Obj.configure(state="normal")
+                    
+                    # Update the entries with the new values
+                    self.textbox_CT.delete(0, "end")
+                    self.textbox_CT.insert(0, str(window.result["ct_num"]))
+                    
+                    self.textbox_Obj.delete(0, "end")
+                    self.textbox_Obj.insert(0, str(window.result["obj_num"]))
+                    
+                    # If BMS mode is not active, switch to it
+                    if self.saving_method_var.get() != "BMS":
+                        self.segemented_button_Saving.set("BMS")
+                        self.switch_save_method("BMS")
+                    else:
+                        # Make sure entries are disabled if BMS mode is already active
+                        self.textbox_CT.configure(state="disable")
+                        self.textbox_Obj.configure(state="disable")
+                    
+                    # Debug: Print updated values
+                    logger.debug(f"Updated CT: {self.textbox_CT.get()}, Obj: {self.textbox_Obj.get()}")
                 else:
-                    # Make sure entries are disabled if BMS mode is already active
-                    self.textbox_CT.configure(state="disable")
-                    self.textbox_Obj.configure(state="disable")
-                
-                # Debug: Print updated values
-                logger.debug(f"Updated CT: {self.textbox_CT.get()}, Obj: {self.textbox_Obj.get()}")
+                    logger.debug("BMS window result missing ct_num or obj_num")
+            elif hasattr(window, 'result'):
+                # Window was cancelled or had an error
+                logger.debug(f"BMS window closed with status: {window.result.get('status', 'unknown')}")
+            else:
+                logger.debug("BMS window closed without result")
                 
         except Exception as e:
             messagebox.showerror(
@@ -5625,6 +5753,15 @@ class OperationPage(tk.Frame):
             selection_dialog.geometry("300x400")
             selection_dialog.transient(self)
             selection_dialog.grab_set()
+            
+            # Register the child window for proper cleanup
+            self.controller.register_child_window(selection_dialog)
+            
+            # Set up cleanup when window is destroyed
+            def on_obj_dialog_destroy():
+                self.controller.unregister_child_window(selection_dialog)
+            
+            selection_dialog.bind("<Destroy>", lambda e: on_obj_dialog_destroy())
             
             # Create listbox with objectives
             listbox = tk.Listbox(selection_dialog)
@@ -5700,6 +5837,15 @@ class OperationPage(tk.Frame):
             selection_dialog.geometry("300x400")
             selection_dialog.transient(self)
             selection_dialog.grab_set()
+            
+            # Register the child window for proper cleanup
+            self.controller.register_child_window(selection_dialog)
+            
+            # Set up cleanup when window is destroyed
+            def on_ct_dialog_destroy():
+                self.controller.unregister_child_window(selection_dialog)
+            
+            selection_dialog.bind("<Destroy>", lambda e: on_ct_dialog_destroy())
             
             # Create listbox with CT numbers
             listbox = tk.Listbox(selection_dialog, width=40)

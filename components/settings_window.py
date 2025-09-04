@@ -142,14 +142,17 @@ class SettingsWindow(tk.Toplevel):
         # Create tab frames
         self.general_tab = self._create_scrollable_frame(self.notebook, tab_name="general_tab")
         self.bms_injection_tab = self._create_scrollable_frame(self.notebook, tab_name="bms_injection_tab")
+        self.cache_tab = self._create_scrollable_frame(self.notebook, tab_name="cache_tab")
         
         # Add tabs to notebook
         self.notebook.add(self.general_tab, text="General")
         self.notebook.add(self.bms_injection_tab, text="BMS Injection")
+        self.notebook.add(self.cache_tab, text="Cache")
         
         # Initialize content for each tab
         self._init_general_tab()
         self._init_bms_injection_tab()
+        self._init_cache_tab()
         
         # Add bottom buttons frame with modern styling
         self.buttons_frame = Ctk.CTkFrame(self.main_frame, fg_color="#D5E3F0")
@@ -632,16 +635,16 @@ class SettingsWindow(tk.Toplevel):
         log_type_label.pack(side=tk.LEFT, padx=(8, 0))
         
         self.log_type_var = tk.StringVar()
-        # Initialize from shared_data, defaulting to "Console Only" if not found or invalid
-        initial_log_method = self.parent.shared_data.get("logging_method").get() if self.parent.shared_data.get("logging_method") else "Console Only"
+        # Initialize from shared_data, defaulting to "None" if not found or invalid (user specified default)
+        initial_log_method = self.parent.shared_data.get("logging_method").get() if self.parent.shared_data.get("logging_method") else "None"
         # Ensure the loaded value is one of the valid options for the dropdown
         valid_log_types = ["None", "Console Only", "File Only", "Console and File"]
         if initial_log_method not in valid_log_types: # Map from simple config value if needed
             if initial_log_method == "Console": initial_log_method = "Console Only"
             elif initial_log_method == "File": initial_log_method = "File Only"
             elif initial_log_method == "Both": initial_log_method = "Console and File"
-            else: initial_log_method = "Console Only" # Fallback
-        self.log_type_var.set(initial_log_method if initial_log_method in valid_log_types else "Console Only")
+            else: initial_log_method = "None" # Fallback to disabled (user specified default)
+        self.log_type_var.set(initial_log_method if initial_log_method in valid_log_types else "None")
         self.log_type_dropdown = Ctk.CTkComboBox(
             log_type_frame,
             values=["None", "Console Only", "File Only", "Console and File"],
@@ -1181,11 +1184,9 @@ class SettingsWindow(tk.Toplevel):
         Uses the same sophisticated OCD analysis as bms_injection_window.py.
         Only updates the GUI fields, does not save data to any file.
         """
-        import xml.etree.ElementTree as ET
-        from pathlib import Path
-        import os
-        import traceback
+        from processing_window import ProcessType, run_template_generation
         from tkinter import messagebox
+        import os
         
         # 1. Initialization - Get the selected type and validate BMS path
         selection = self.objective_type_var.get()
@@ -1203,11 +1204,7 @@ class SettingsWindow(tk.Toplevel):
         type_name = self._get_type_name(type_key)
         logging.info(f"RESETTING VALUES FOR OBJECTIVE TYPE: {type_key} ({type_name})")
         
-        # Use the BMS path that's already loaded in the settings window  
-        logging.debug(f"Starting objective reset for type {type_key} ({type_name})")
-        logging.debug(f"self.bms_path = '{self.bms_path}'")
-        logging.debug(f"type(self.bms_path) = {type(self.bms_path)}")
-        
+        # Validate BMS path
         if not self.bms_path:
             logging.critical("BMS path is None or empty")
             messagebox.showerror("Error", "BMS path is not set. Please check the BMS path in General tab.")
@@ -1220,14 +1217,77 @@ class SettingsWindow(tk.Toplevel):
         else:
             bms_path = self.bms_path
             
-        logging.debug(f"Using BMS directory: '{bms_path}'")
-        
         if not os.path.isdir(bms_path):
             logging.critical(f"BMS directory does not exist: '{bms_path}'")
             messagebox.showerror("Error", f"Invalid BMS installation directory: {bms_path}\nPlease check the BMS path in General tab.")
             return False
             
         logging.info(f"Using BMS path: {bms_path}")
+        
+        # Define the calculation task that will run in the background
+        def calculate_objective_default_values_task(processing_window=None):
+            """Background task to calculate median values for the selected objective type."""
+            return self._calculate_objective_median_values_for_type(type_key, type_name, bms_path)
+        
+        # Run the calculation with a processing window
+        logging.info(f"[SETTINGS] Starting objective default value calculation with processing window for type {type_key}")
+        result = run_template_generation(
+            parent=self,
+            task_function=calculate_objective_default_values_task,
+            process_type=ProcessType.CALCULATE_DEFAULT_VALUES,
+            title="Calculating Default Values",
+            message=f"Calculating median values for {type_name} objectives..."
+        )
+        
+        # Handle the result
+        if result and isinstance(result, dict) and result.get('success'):
+            calculated_values = result.get('calculated_values', {})
+            ocd_count = result.get('ocd_count', 0)
+            field_count = result.get('field_count', 0)
+            
+            # Update the GUI fields with calculated values
+            self._update_objective_gui_fields_with_values(calculated_values)
+            
+            # Show success message
+            messagebox.showinfo(
+                "Reset Complete",
+                f"Successfully calculated median values from {ocd_count} existing objectives.\n"
+                f"Updated {field_count} fields with median values."
+            )
+            return True
+        elif result and isinstance(result, dict) and result.get('success') is False:
+            # No matching objectives found
+            messagebox.showwarning(
+                "No Matching Objectives Found",
+                f"No objectives of type {type_key} ({type_name}) were found.\n"
+                f"Field values have been kept as is."
+            )
+            return False
+        else:
+            # Error occurred
+            messagebox.showerror(
+                "Error",
+                "An error occurred while calculating default values. Check the console for details."
+            )
+            return False
+    
+    def _calculate_objective_median_values_for_type(self, type_key, type_name, bms_path):
+        """
+        Calculate median values for objective fields based on existing objectives of the given type.
+        This method contains the core processing logic separated from UI updates.
+        
+        Args:
+            type_key: The objective type key (1-31)
+            type_name: The human-readable name of the objective type
+            bms_path: The BMS installation directory path
+            
+        Returns:
+            dict: Result dictionary with success status, calculated values, and counts
+        """
+        import xml.etree.ElementTree as ET
+        from pathlib import Path
+        import os
+        import traceback
         
         # Define field names to collect values for
         median_fields = [
@@ -1256,8 +1316,10 @@ class SettingsWindow(tk.Toplevel):
         
         if not ct_path:
             logging.error(f"CT file not found in '{bms_path}' (tried both .xml and .XML)")
-            messagebox.showerror("Error", f"CT file not found in {bms_path}\nTried: Falcon4_CT.xml and Falcon4_CT.XML")
-            return False
+            return {
+                'success': False,
+                'error': f"CT file not found in {bms_path}"
+            }
         
         try:
             # 2. CT File Processing - Load and parse the CT file
@@ -1449,52 +1511,70 @@ class SettingsWindow(tk.Toplevel):
                     else:
                         calculated_values[field] = "0"
             
-            # 5. UI Update - Update the GUI entries with calculated values
-            updated_fields = set()
-            field_count = 0
+            # Count fields that would be updated
+            field_count = len([field for field in calculated_values.keys() if field in self.field_vars])
             
-            # Make sure we have the field variables before trying to update them
-            if not hasattr(self, 'field_vars') or not self.field_vars:
-                messagebox.showerror("Error", "No field variables available for update")
-                return False
-                
-            for field_name, string_var in self.field_vars.items():
-                if field_name in calculated_values and field_name not in updated_fields:
-                    value = calculated_values[field_name]
-                    # Update the StringVar
-                    string_var.set(str(value))
-                    
-                    # Count updated fields and mark as updated
-                    field_count += 1
-                    updated_fields.add(field_name)
-            
-            # Reset complete
-            
-            # Show success/failure message
+            # Return result based on success
             if ocd_count == 0:
                 # No matching OCD files found
-                messagebox.showwarning(
-                    "No Matching Objectives Found",
-                    f"No objectives of type {type_key} ({type_name}) were found.\n"
-                    f"Field values have been kept as is."
-                )
-                return False
+                logging.warning(f"No objectives of type {type_key} ({type_name}) were found")
+                return {
+                    'success': False,
+                    'ocd_count': 0,
+                    'field_count': 0,
+                    'calculated_values': {}
+                }
             else:
-                # Successfully updated fields
-                messagebox.showinfo(
-                    "Reset Complete",
-                    f"Successfully calculated median values from {ocd_count} existing objectives.\n"
-                    f"Updated {field_count} fields with median values."
-                )
-                return True
+                # Successfully calculated values
+                logging.info(f"Successfully calculated median values from {ocd_count} existing objectives, updating {field_count} fields")
+                return {
+                    'success': True,
+                    'ocd_count': ocd_count,
+                    'field_count': field_count,
+                    'calculated_values': calculated_values
+                }
                 
         except Exception as e:
-            # Log and display any errors
-            error_msg = f"Error resetting fields to defaults: {e}"
+            # Log the error
+            error_msg = f"Error calculating objective median values: {e}"
             logging.error(f"ERROR: {error_msg}")
             traceback.print_exc()
-            messagebox.showerror("Error", error_msg)
-            return False
+            return {
+                'success': False,
+                'error': error_msg,
+                'ocd_count': 0,
+                'field_count': 0,
+                'calculated_values': {}
+            }
+    
+    def _update_objective_gui_fields_with_values(self, calculated_values):
+        """
+        Update the objective GUI field variables with the calculated values.
+        
+        Args:
+            calculated_values: Dictionary of field names to calculated values
+        """
+        updated_fields = set()
+        field_count = 0
+        
+        # Make sure we have the field variables before trying to update them
+        if not hasattr(self, 'field_vars') or not self.field_vars:
+            logging.warning("No objective field variables available to update")
+            return 0
+            
+        for field_name, string_var in self.field_vars.items():
+            if field_name in calculated_values and field_name not in updated_fields:
+                value = calculated_values[field_name]
+                # Update the StringVar
+                string_var.set(str(value))
+                
+                # Count updated fields and mark as updated
+                field_count += 1
+                updated_fields.add(field_name)
+                logging.debug(f"Updated objective field {field_name} = {value}")
+        
+        logging.info(f"Updated {field_count} objective GUI fields with calculated values")
+        return field_count
     
     def _toggle_backup_bms(self):
         """Toggle backup BMS files setting.
@@ -1897,11 +1977,9 @@ class SettingsWindow(tk.Toplevel):
         Uses the same sophisticated CT analysis as bms_injection_window.py.
         Only updates the GUI fields, does not save data to any file.
         """
-        import xml.etree.ElementTree as ET
-        from pathlib import Path
-        import os
-        import traceback
+        from processing_window import ProcessType, run_template_generation
         from tkinter import messagebox
+        import os
         
         # 1. Initialization - Get the selected type and validate BMS path
         selection = self.ct_type_var.get()
@@ -1914,11 +1992,7 @@ class SettingsWindow(tk.Toplevel):
         type_name = self._get_type_name(type_key)
         logging.info(f"RESETTING CT VALUES FOR TYPE: {type_key} ({type_name})")
         
-        # Use the BMS path that's already loaded in the settings window
-        logging.debug(f"Starting CT reset for type {type_key} ({type_name})")
-        logging.debug(f"self.bms_path = '{self.bms_path}'")
-        logging.debug(f"type(self.bms_path) = {type(self.bms_path)}")
-        
+        # Validate BMS path
         if not self.bms_path:
             logging.critical("BMS path is None or empty")
             messagebox.showerror("Error", "BMS path is not set. Please check the BMS path in General tab.")
@@ -1931,12 +2005,75 @@ class SettingsWindow(tk.Toplevel):
         else:
             bms_path = self.bms_path
             
-        logging.debug(f"Using BMS directory: '{bms_path}'")
-        
         if not os.path.isdir(bms_path):
             logging.critical(f"BMS directory does not exist: '{bms_path}'")
             messagebox.showerror("Error", f"Invalid BMS installation directory: {bms_path}\nPlease check the BMS path in General tab.")
             return False
+        
+        # Define the calculation task that will run in the background
+        def calculate_ct_default_values_task(processing_window=None):
+            """Background task to calculate median values for the selected CT type."""
+            return self._calculate_ct_median_values_for_type(type_key, type_name, bms_path)
+        
+        # Run the calculation with a processing window
+        logging.info(f"[SETTINGS] Starting CT default value calculation with processing window for type {type_key}")
+        result = run_template_generation(
+            parent=self,
+            task_function=calculate_ct_default_values_task,
+            process_type=ProcessType.CALCULATE_DEFAULT_VALUES,
+            title="Calculating Default CT Values",
+            message=f"Calculating median values for {type_name} CT entries..."
+        )
+        
+        # Handle the result
+        if result and isinstance(result, dict) and result.get('success'):
+            calculated_values = result.get('calculated_values', {})
+            ct_count = result.get('ct_count', 0)
+            field_count = result.get('field_count', 0)
+            
+            # Update the GUI fields with calculated values
+            self._update_ct_gui_fields_with_values(calculated_values)
+            
+            # Show success message
+            messagebox.showinfo(
+                "Reset Complete",
+                f"Successfully calculated median values from {ct_count} existing CT entries.\n"
+                f"Updated {field_count} fields with median values."
+            )
+            return True
+        elif result and isinstance(result, dict) and result.get('success') is False:
+            # No matching CT entries found
+            messagebox.showwarning(
+                "No Matching CT Entries Found",
+                f"No CT entries of type {type_key} ({type_name}) were found.\n"
+                f"Field values have been kept as is."
+            )
+            return False
+        else:
+            # Error occurred
+            messagebox.showerror(
+                "Error",
+                "An error occurred while calculating default CT values. Check the console for details."
+            )
+            return False
+    
+    def _calculate_ct_median_values_for_type(self, type_key, type_name, bms_path):
+        """
+        Calculate median values for CT fields based on existing CT entries of the given type.
+        This method contains the core processing logic separated from UI updates.
+        
+        Args:
+            type_key: The objective type key (1-31)
+            type_name: The human-readable name of the objective type
+            bms_path: The BMS installation directory path
+            
+        Returns:
+            dict: Result dictionary with success status, calculated values, and counts
+        """
+        import xml.etree.ElementTree as ET
+        from pathlib import Path
+        import os
+        import traceback
         
         # Find the CT file with case-insensitive search
         logging.debug(f"Searching for CT file in directory: '{bms_path}'")
@@ -1953,8 +2090,10 @@ class SettingsWindow(tk.Toplevel):
         
         if not ct_path:
             logging.error(f"CT file not found in '{bms_path}' (tried both .xml and .XML)")
-            messagebox.showerror("Error", f"CT file not found in {bms_path}\nTried: Falcon4_CT.xml and Falcon4_CT.XML")
-            return False
+            return {
+                'success': False,
+                'error': f"CT file not found in {bms_path}"
+            }
             
         # Define field names to collect values for (same as bms_injection_window.py)
         median_fields = [
@@ -2072,49 +2211,70 @@ class SettingsWindow(tk.Toplevel):
                     else:
                         calculated_values[field] = "0"
             
-            # 4. UI Update - Update the GUI entries with calculated values
-            if not hasattr(self, 'ct_field_vars') or not self.ct_field_vars:
-                messagebox.showerror("Error", "CT field variables not initialized")
-                return False
-                
-            updated_fields = set()
-            field_count = 0
+            # Count fields that would be updated
+            field_count = len([field for field in calculated_values.keys() if field in self.ct_field_vars])
             
-            for field_name, string_var in self.ct_field_vars.items():
-                if field_name in calculated_values and field_name not in updated_fields:
-                    value = calculated_values[field_name]
-                    # Update the string variable
-                    string_var.set(str(value))
-                    
-                    # Count updated fields and mark as updated
-                    field_count += 1
-                    updated_fields.add(field_name)
-            
-            # Show success/failure message
+            # Return result based on success
             if matching_ct_entries == 0:
                 # No matching CT entries found
-                messagebox.showwarning(
-                    "No Matching CT Entries Found",
-                    f"No CT entries of type {type_key} ({type_name}) were found.\n"
-                    f"Field values have been kept as is."
-                )
-                return False
+                logging.warning(f"No CT entries of type {type_key} ({type_name}) were found")
+                return {
+                    'success': False,
+                    'ct_count': 0,
+                    'field_count': 0,
+                    'calculated_values': {}
+                }
             else:
-                # Successfully updated fields
-                messagebox.showinfo(
-                    "Reset Complete",
-                    f"Successfully calculated median values from {matching_ct_entries} existing CT entries.\n"
-                    f"Updated {field_count} fields with median values."
-                )
-                return True
+                # Successfully calculated values
+                logging.info(f"Successfully calculated median values from {matching_ct_entries} existing CT entries, updating {field_count} fields")
+                return {
+                    'success': True,
+                    'ct_count': matching_ct_entries,
+                    'field_count': field_count,
+                    'calculated_values': calculated_values
+                }
                 
         except Exception as e:
-            # Log and display any errors
-            error_msg = f"Error resetting CT fields to defaults: {e}"
-            logging.error(error_msg)
+            # Log the error
+            error_msg = f"Error calculating CT median values: {e}"
+            logging.error(f"ERROR: {error_msg}")
             traceback.print_exc()
-            messagebox.showerror("Error", error_msg)
-            return False
+            return {
+                'success': False,
+                'error': error_msg,
+                'ct_count': 0,
+                'field_count': 0,
+                'calculated_values': {}
+            }
+    
+    def _update_ct_gui_fields_with_values(self, calculated_values):
+        """
+        Update the CT GUI field variables with the calculated values.
+        
+        Args:
+            calculated_values: Dictionary of field names to calculated values
+        """
+        updated_fields = set()
+        field_count = 0
+        
+        # Make sure we have the CT field variables before trying to update them
+        if not hasattr(self, 'ct_field_vars') or not self.ct_field_vars:
+            logging.warning("No CT field variables available to update")
+            return 0
+            
+        for field_name, string_var in self.ct_field_vars.items():
+            if field_name in calculated_values and field_name not in updated_fields:
+                value = calculated_values[field_name]
+                # Update the string variable
+                string_var.set(str(value))
+                
+                # Count updated fields and mark as updated
+                field_count += 1
+                updated_fields.add(field_name)
+                logging.debug(f"Updated CT field {field_name} = {value}")
+        
+        logging.info(f"Updated {field_count} CT GUI fields with calculated values")
+        return field_count
     
     def _init_ct_interface(self):
         """Initialize the interface for class table data.
@@ -2228,6 +2388,207 @@ class SettingsWindow(tk.Toplevel):
         # Load the fields for initially selected CT type (same as objective interface)
         if self.ct_type_var.get():
             self._load_ct_fields(self.ct_type_var.get())
+    
+    def _init_cache_tab(self):
+        """Initialize the Cache tab content."""
+        # Get the scrollable frame content area
+        content_frame = self._get_scrollable_content(self.cache_tab)
+        
+        # Create header section with warning
+        header_frame = Ctk.CTkFrame(content_frame, fg_color="#E0E8F0", border_width=1, border_color="#B3C8DD")
+        header_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        # Section title
+        header_label = Ctk.CTkLabel(
+            header_frame,
+            text="Cache Management",
+            font=("Arial", 16, "bold"),
+            text_color="#000033",
+            fg_color="transparent"
+        )
+        header_label.pack(anchor="w", padx=12, pady=(12, 6))
+        
+        # Warning text
+        warning_label = Ctk.CTkLabel(
+            header_frame,
+            text="⚠️ Warning: These operations will modify or delete cached data.\nMake sure to backup important configurations before proceeding.",
+            font=("Arial", 11),
+            text_color="#CC3300",
+            fg_color="transparent",
+            justify="left"
+        )
+        warning_label.pack(anchor="w", padx=12, pady=(0, 12))
+        
+        # Create data recalculation section
+        data_section_frame = Ctk.CTkFrame(content_frame, fg_color="#E0E8F0", border_width=1, border_color="#B3C8DD")
+        data_section_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        data_section_label = Ctk.CTkLabel(
+            data_section_frame,
+            text="Data Recalculation",
+            font=("Arial", 14, "bold"),
+            text_color="#000033",
+            fg_color="transparent"
+        )
+        data_section_label.pack(anchor="w", padx=12, pady=(12, 6))
+        
+        # Recalculate All Data button
+        recalc_all_frame = Ctk.CTkFrame(data_section_frame, fg_color="#E0E8F0")
+        recalc_all_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        self.recalc_all_button = Ctk.CTkButton(
+            recalc_all_frame,
+            text="Recalculate Data",
+            command=self._recalculate_all_data,
+            fg_color="#A1B9D0",
+            hover_color="#7A92A9",
+            text_color="#000000",
+            height=35,
+            width=180,
+            corner_radius=8,
+            border_width=1,
+            border_color="#8AA2BC",
+            font=("Arial", 12)
+        )
+        self.recalc_all_button.pack(side=tk.LEFT, padx=8, pady=8)
+        
+        recalc_all_desc = Ctk.CTkLabel(
+            recalc_all_frame,
+            text="Recalculate all cache data (objectives, templates, class tables)",
+            font=("Arial", 11),
+            text_color="#2E2E3A",
+            fg_color="transparent"
+        )
+        recalc_all_desc.pack(side=tk.LEFT, padx=8, pady=8)
+        
+        # Recalculate Objects Cache button
+        recalc_obj_frame = Ctk.CTkFrame(data_section_frame, fg_color="#E0E8F0")
+        recalc_obj_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        self.recalc_obj_button = Ctk.CTkButton(
+            recalc_obj_frame,
+            text="Recalculate Objects Cache",
+            command=self._recalculate_objects_cache,
+            fg_color="#A1B9D0",
+            hover_color="#7A92A9",
+            text_color="#000000",
+            height=35,
+            width=180,
+            corner_radius=8,
+            border_width=1,
+            border_color="#8AA2BC",
+            font=("Arial", 12)
+        )
+        self.recalc_obj_button.pack(side=tk.LEFT, padx=8, pady=8)
+        
+        recalc_obj_desc = Ctk.CTkLabel(
+            recalc_obj_frame,
+            text="Recalculate objective templates from BMS data",
+            font=("Arial", 11),
+            text_color="#2E2E3A",
+            fg_color="transparent"
+        )
+        recalc_obj_desc.pack(side=tk.LEFT, padx=8, pady=8)
+        
+        # Recalculate Class Tables Cache button
+        recalc_ct_frame = Ctk.CTkFrame(data_section_frame, fg_color="#E0E8F0")
+        recalc_ct_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        self.recalc_ct_button = Ctk.CTkButton(
+            recalc_ct_frame,
+            text="Recalculate Class Tables Cache",
+            command=self._recalculate_ct_cache,
+            fg_color="#A1B9D0",
+            hover_color="#7A92A9",
+            text_color="#000000",
+            height=35,
+            width=180,
+            corner_radius=8,
+            border_width=1,
+            border_color="#8AA2BC",
+            font=("Arial", 12)
+        )
+        self.recalc_ct_button.pack(side=tk.LEFT, padx=8, pady=8)
+        
+        recalc_ct_desc = Ctk.CTkLabel(
+            recalc_ct_frame,
+            text="Recalculate class table templates from BMS data",
+            font=("Arial", 11),
+            text_color="#2E2E3A",
+            fg_color="transparent"
+        )
+        recalc_ct_desc.pack(side=tk.LEFT, padx=8, pady=8)
+        
+        # Create maintenance section
+        maintenance_section_frame = Ctk.CTkFrame(content_frame, fg_color="#E0E8F0", border_width=1, border_color="#B3C8DD")
+        maintenance_section_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        maintenance_section_label = Ctk.CTkLabel(
+            maintenance_section_frame,
+            text="Data Maintenance",
+            font=("Arial", 14, "bold"),
+            text_color="#000033",
+            fg_color="transparent"
+        )
+        maintenance_section_label.pack(anchor="w", padx=12, pady=(12, 6))
+        
+        # Reset Statistics button
+        reset_stats_frame = Ctk.CTkFrame(maintenance_section_frame, fg_color="#E0E8F0")
+        reset_stats_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        self.reset_stats_button = Ctk.CTkButton(
+            reset_stats_frame,
+            text="Reset Statistics",
+            command=self._reset_statistics,
+            fg_color="#A1B9D0",
+            hover_color="#7A92A9",
+            text_color="#000000",
+            height=35,
+            width=180,
+            corner_radius=8,
+            border_width=1,
+            border_color="#8AA2BC",
+            font=("Arial", 12)
+        )
+        self.reset_stats_button.pack(side=tk.LEFT, padx=8, pady=8)
+        
+        reset_stats_desc = Ctk.CTkLabel(
+            reset_stats_frame,
+            text="Reset feature generation statistics to defaults",
+            font=("Arial", 11),
+            text_color="#2E2E3A",
+            fg_color="transparent"
+        )
+        reset_stats_desc.pack(side=tk.LEFT, padx=8, pady=8)
+        
+        # Delete Configuration button
+        delete_config_frame = Ctk.CTkFrame(maintenance_section_frame, fg_color="#E0E8F0")
+        delete_config_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        self.delete_config_button = Ctk.CTkButton(
+            delete_config_frame,
+            text="Delete Saved Configuration",
+            command=self._delete_configuration,
+            fg_color="#D08A8A",  # Different color for destructive action
+            hover_color="#B87A7A",
+            text_color="#000000",
+            height=35,
+            width=180,
+            corner_radius=8,
+            border_width=1,
+            border_color="#C88888",
+            font=("Arial", 12)
+        )
+        self.delete_config_button.pack(side=tk.LEFT, padx=8, pady=8)
+        
+        delete_config_desc = Ctk.CTkLabel(
+            delete_config_frame,
+            text="Delete saved application configuration (config.json)",
+            font=("Arial", 11),
+            text_color="#2E2E3A",
+            fg_color="transparent"
+        )
+        delete_config_desc.pack(side=tk.LEFT, padx=8, pady=8)
     
     def _load_ct_types(self):
         """Load Class Table types with meaningful objective type names.
@@ -2640,7 +3001,385 @@ class SettingsWindow(tk.Toplevel):
         
         # Show a confirmation message to the user
         messagebox.showinfo("Logging Settings Applied", message)
+    
+    def _recalculate_all_data(self):
+        """Recalculate all cache data including objectives, templates, and class tables."""
+        # Show confirmation dialog
+        confirm_result = messagebox.askyesno(
+            "Confirm Recalculation",
+            "This will recalculate ALL major cache data:\n\n"
+            "• General objectives data (objective_cache.json)\n"
+            "• Objective templates (objective_templates.json)\n" 
+            "• Class table templates (ct_templates.json)\n"
+            "This operation may take several minutes.\n\n"
+            "Are you sure you want to continue?",
+            icon='warning'
+        )
+        
+        if not confirm_result:
+            return
+            
+        try:
+            from processing_window import run_with_processing
+            import os
+            
+            def recalculation_task(processing_window):
+                """Task to recalculate all data with proper error handling."""
+                try:
+                    # Step 1: Remove existing files
+                    from utils.json_path_handler import get_json_path, JsonFiles
+                    files_to_remove = [
+                        JsonFiles.OBJECTIVE_CACHE,
+                        JsonFiles.OBJECTIVE_TEMPLATES,
+                        JsonFiles.CT_TEMPLATES,
+                        JsonFiles.SAVED_OBJECTIVE_SETTINGS
+                    ]
+                    
+                    for file_name in files_to_remove:
+                        file_path = get_json_path(file_name)
+                        if os.path.exists(file_path):
+                            os.remove(file_path)
+                            logging.info(f"Removed {file_name}")
+                    
+                    # Step 2: Resolve BMS root and create injector
+                    from pathlib import Path
+                    from bms_injector import BmsInjector
+                    from utils.json_path_handler import save_json, JsonFiles
 
+                    def _resolve_bms_root_path_local(input_path):
+                        try:
+                            p = Path(input_path) if input_path else Path.cwd()
+                            if p.is_file():
+                                p = p.parent
+                            # Try a few ancestors to locate Data/TerrData/Falcon4_CT.xml
+                            candidates = [p, p.parent, p.parent.parent, p.parent.parent.parent]
+                            for base in candidates:
+                                ct_candidate = base / "Data" / "TerrData" / "Falcon4_CT.xml"
+                                if ct_candidate.exists():
+                                    return str(base)
+                            return str(p)
+                        except Exception:
+                            return str(Path.cwd())
+
+                    bms_root_path = _resolve_bms_root_path_local(self.bms_path)
+
+                    injector = BmsInjector(
+                        bms_path=bms_root_path,
+                        auto_create_templates=False  # We'll create them manually
+                    )
+
+                    # Step 3: Generate templates directly (single authority)
+                    objective_templates = injector._create_default_templates()
+                    ct_templates = injector._create_default_ct_templates()
+
+                    # Persist templates
+                    save_json(JsonFiles.OBJECTIVE_TEMPLATES, objective_templates)
+                    save_json(JsonFiles.CT_TEMPLATES, ct_templates)
+
+                    # Step 4: Rebuild the objective cache synchronously
+                    from components.objective_cache import cache as objective_cache
+
+                    bms_version = injector._get_bms_version()
+                    objective_cache.set_bms_version(bms_version)
+
+                    ct_data = injector._analyze_ct_file()
+                    if ct_data:
+                        objective_cache.set_ct_data(ct_data)
+
+                    obj_data = injector._analyze_objectives()
+                    if obj_data:
+                        objective_cache.set_objective_data(obj_data)
+
+                    # Ensure cache uses the freshly generated templates
+                    objective_cache.set_objective_templates(objective_templates)
+
+                    # Save cache synchronously
+                    objective_cache.save_cache()
+                    
+                    logging.info("Successfully recalculated all cache data")
+                    return True
+                    
+                except Exception as e:
+                    logging.error(f"Error during data recalculation: {str(e)}")
+                    raise e
+            
+            # Run the task with processing window
+            result = run_with_processing(
+                parent=self,
+                task_function=recalculation_task,
+                title="Recalculating Data",
+                message="Recalculating all cache data...\nThis may take several minutes.",
+                width=400,
+                height=150
+            )
+            
+            if result:
+                messagebox.showinfo(
+                    "Recalculation Complete",
+                    "All cache data has been successfully recalculated.\n\n"
+                    "The following files have been regenerated:\n"
+                    "• objective_cache.json\n"
+                    "• objective_templates.json\n"
+                    "• ct_templates.json\n"
+                )
+            else:
+                messagebox.showerror("Error", "Failed to recalculate cache data. Check logs for details.")
+                
+        except Exception as e:
+            logging.error(f"Error in recalculate all data: {str(e)}")
+            messagebox.showerror("Error", f"Failed to recalculate data: {str(e)}")
+    
+    def _recalculate_objects_cache(self):
+        """Recalculate objective templates from BMS data."""
+        # Show confirmation dialog
+        confirm_result = messagebox.askyesno(
+            "Confirm Objective Templates Recalculation",
+            "This will recalculate objective templates from BMS data:\n\n"
+            "• objective_templates.json will be regenerated\n\n"
+            "This operation may take a few minutes.\n\n"
+            "Are you sure you want to continue?",
+            icon='warning'
+        )
+        
+        if not confirm_result:
+            return
+            
+        try:
+            from processing_window import run_with_processing
+            import os
+            
+            def objectives_recalculation_task(processing_window):
+                """Task to recalculate objective templates."""
+                try:
+                    # Remove existing objective templates file
+                    from utils.json_path_handler import get_json_path, JsonFiles
+                    obj_templates_path = get_json_path(JsonFiles.OBJECTIVE_TEMPLATES)
+                    if os.path.exists(obj_templates_path):
+                        os.remove(obj_templates_path)
+                        logging.info("Removed existing objective_templates.json")
+                    
+                    # Create BmsInjector and generate objective templates directly
+                    from bms_injector import BmsInjector
+                    
+                    # Create injector instance
+                    injector = BmsInjector(
+                        bms_path=self.bms_path,
+                        auto_create_templates=False  # We'll create them manually
+                    )
+                    
+                    # Generate objective templates directly
+                    objective_templates = injector._create_default_templates()
+                    
+                    # Save the templates
+                    from utils.json_path_handler import save_json, JsonFiles
+                    save_json(JsonFiles.OBJECTIVE_TEMPLATES, objective_templates)
+                    
+                    logging.info("Successfully recalculated objective templates")
+                    return True
+                    
+                except Exception as e:
+                    logging.error(f"Error during objective templates recalculation: {str(e)}")
+                    raise e
+            
+            # Run the task with processing window
+            result = run_with_processing(
+                parent=self,
+                task_function=objectives_recalculation_task,
+                title="Recalculating Objective Templates",
+                message="Analyzing BMS data and generating objective templates...",
+                width=400,
+                height=150
+            )
+            
+            if result:
+                messagebox.showinfo(
+                    "Recalculation Complete",
+                    "Objective templates have been successfully recalculated from BMS data.\n\n"
+                    "The objective_templates.json file has been regenerated."
+                )
+            else:
+                messagebox.showerror("Error", "Failed to recalculate objective templates. Check logs for details.")
+                
+        except Exception as e:
+            logging.error(f"Error in recalculate objectives cache: {str(e)}")
+            messagebox.showerror("Error", f"Failed to recalculate objective templates: {str(e)}")
+    
+    def _recalculate_ct_cache(self):
+        """Recalculate class table templates from BMS data."""
+        # Show confirmation dialog
+        confirm_result = messagebox.askyesno(
+            "Confirm Class Table Templates Recalculation",
+            "This will recalculate class table templates from BMS data:\n\n"
+            "• ct_templates.json will be regenerated\n\n"
+            "This operation may take a few minutes.\n\n"
+            "Are you sure you want to continue?",
+            icon='warning'
+        )
+        
+        if not confirm_result:
+            return
+            
+        try:
+            from processing_window import run_with_processing
+            import os
+            
+            def ct_recalculation_task(processing_window):
+                """Task to recalculate CT templates."""
+                try:
+                    # Remove existing CT templates file
+                    from utils.json_path_handler import get_json_path, JsonFiles
+                    ct_templates_path = get_json_path(JsonFiles.CT_TEMPLATES)
+                    if os.path.exists(ct_templates_path):
+                        os.remove(ct_templates_path)
+                        logging.info("Removed existing ct_templates.json")
+                    
+                    # Create BmsInjector and generate CT templates directly
+                    from bms_injector import BmsInjector
+                    
+                    # Create injector instance
+                    injector = BmsInjector(
+                        bms_path=self.bms_path,
+                        auto_create_templates=False  # We'll create them manually
+                    )
+                    
+                    # Generate CT templates directly
+                    ct_templates = injector._create_default_ct_templates()
+                    
+                    # Save the templates
+                    from utils.json_path_handler import save_json, JsonFiles
+                    save_json(JsonFiles.CT_TEMPLATES, ct_templates)
+                    
+                    logging.info("Successfully recalculated CT templates")
+                    return True
+                    
+                except Exception as e:
+                    logging.error(f"Error during CT templates recalculation: {str(e)}")
+                    raise e
+            
+            # Run the task with processing window
+            result = run_with_processing(
+                parent=self,
+                task_function=ct_recalculation_task,
+                title="Recalculating Class Table Templates",
+                message="Analyzing BMS CT file and generating templates...",
+                width=400,
+                height=150
+            )
+            
+            if result:
+                messagebox.showinfo(
+                    "Recalculation Complete",
+                    "Class table templates have been successfully recalculated from BMS data.\n\n"
+                    "The ct_templates.json file has been regenerated."
+                )
+            else:
+                messagebox.showerror("Error", "Failed to recalculate CT templates. Check logs for details.")
+                
+        except Exception as e:
+            logging.error(f"Error in recalculate CT cache: {str(e)}")
+            messagebox.showerror("Error", f"Failed to recalculate CT templates: {str(e)}")
+    
+    def _reset_statistics(self):
+        """Reset feature generation statistics to defaults."""
+        # Show confirmation dialog
+        confirm_result = messagebox.askyesno(
+            "Confirm Statistics Reset",
+            "This will reset all feature generation statistics to defaults:\n\n"
+            "• Total features count will be reset to 0\n"
+            "• Total usage count will be reset to 0\n"
+            "• Feature type statistics will be cleared\n\n"
+            "This action cannot be undone.\n\n"
+            "Are you sure you want to continue?",
+            icon='warning'
+        )
+        
+        if not confirm_result:
+            return
+            
+        try:
+            from utils.json_path_handler import save_json, JsonFiles
+            from collections import Counter
+            
+            # Create default statistics structure
+            default_stats = {
+                "total_features": 0,
+                "total_usage": 0,
+                "feature_types": {}
+            }
+            
+            # Save the default statistics
+            success = save_json(JsonFiles.FEATURE_STATISTICS, default_stats)
+            
+            if success:
+                logging.info("Successfully reset feature statistics to defaults")
+                messagebox.showinfo(
+                    "Statistics Reset Complete",
+                    "Feature generation statistics have been successfully reset to defaults.\n\n"
+                    "All counters have been reset to 0."
+                )
+            else:
+                messagebox.showerror("Error", "Failed to reset statistics. Check logs for details.")
+                
+        except Exception as e:
+            logging.error(f"Error resetting statistics: {str(e)}")
+            messagebox.showerror("Error", f"Failed to reset statistics: {str(e)}")
+    
+    def _delete_configuration(self):
+        """Delete saved application configuration (config.json)."""
+        # Show strong confirmation dialog
+        confirm_result = messagebox.askyesno(
+            "⚠️ CONFIRM CONFIGURATION DELETION",
+            "This will PERMANENTLY DELETE your saved application configuration:\n\n"
+            "• All saved paths and settings will be lost\n"
+            "• Application will start with default settings next time\n"
+            "• You will need to reconfigure all paths and preferences\n\n"
+            "THIS ACTION CANNOT BE UNDONE!\n\n"
+            "Are you absolutely sure you want to delete the configuration?",
+            icon='error'
+        )
+        
+        if not confirm_result:
+            return
+            
+        # Second confirmation for extra safety
+        final_confirm = messagebox.askyesno(
+            "FINAL CONFIRMATION",
+            "Last chance to cancel!\n\n"
+            "This will delete config.json and ALL your saved settings.\n\n"
+            "Click YES to delete configuration.\n"
+            "Click NO to cancel and keep your settings.",
+            icon='error'
+        )
+        
+        if not final_confirm:
+            return
+            
+        try:
+            from utils.json_path_handler import get_json_path, JsonFiles
+            import os
+            
+            # Get path to config.json
+            config_path = get_json_path(JsonFiles.CONFIG_JSON)
+            
+            if os.path.exists(config_path):
+                os.remove(config_path)
+                logging.info("Successfully deleted configuration file")
+                messagebox.showinfo(
+                    "Configuration Deleted",
+                    "Application configuration has been successfully deleted.\n\n"
+                    "The application will start with default settings next time it's launched.\n\n"
+                    "You may want to restart the application now."
+                )
+            else:
+                messagebox.showwarning(
+                    "Configuration Not Found",
+                    "No configuration file was found to delete.\n\n"
+                    "The application may already be using default settings."
+                )
+                
+        except Exception as e:
+            logging.error(f"Error deleting configuration: {str(e)}")
+            messagebox.showerror("Error", f"Failed to delete configuration: {str(e)}")
 
 
 # For testing purposes only
