@@ -97,7 +97,7 @@ class MainPage(tk.Tk):
         self._child_windows = set()  # Track child windows
 
         self.frames = {}
-        for F in (DashboardPage, DatabasePage, GeoDataPage, OperationPage):
+        for F in (DashboardPage, DatabasePage, GeoDataPage, OperationPage, FootPrintsPage):
             page_name = F.__name__
             frame = F(parent=self, controller=self)
             self.frames[page_name] = frame
@@ -107,7 +107,7 @@ class MainPage(tk.Tk):
             frame.grid(row=0, column=0, sticky="nsew")
 
         # Set Name and Icon and version
-        self.shared_data["BuildingGeneratorVer"].set("Building Generator v1.8")
+        self.shared_data["BuildingGeneratorVer"].set("Building Generator v2.0")
         self.title(self.shared_data["BuildingGeneratorVer"].get())
         self.iconbitmap("Assets/icon_128.ico")
 
@@ -118,6 +118,12 @@ class MainPage(tk.Tk):
         
         # Set up window close protocol
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+        # Ensure footprints directory structure exists
+        try:
+            self._ensure_footprints_dirs()
+        except Exception as _e:
+            logging.warning(f"Could not ensure footprints directories: {_e}")
 
     def show_frame(self, page_name):
         # Hide all frames
@@ -250,6 +256,35 @@ class MainPage(tk.Tk):
                     f.write(f"Traceback:\n{traceback.format_exc()}\n")
             except:
                 pass  # If even this fails, continue without logging
+
+    def _get_root_dir(self):
+        """Return the application root directory for storing footprints."""
+        try:
+            is_compiled = getattr(sys, 'frozen', False)
+            if is_compiled:
+                return os.path.dirname(sys.executable)
+            return os.path.dirname(os.path.abspath(__file__))
+        except Exception:
+            return os.getcwd()
+
+    def _get_footprints_root(self):
+        """Return the root/footprints directory path."""
+        return os.path.join(self._get_root_dir(), "footprints")
+
+    def _ensure_footprints_dirs(self):
+        """Create the footprints directory structure if missing."""
+        fp_root = self._get_footprints_root()
+        subdirs = [
+            fp_root,
+            os.path.join(fp_root, "microsoft"),
+            os.path.join(fp_root, "google"),
+            os.path.join(fp_root, "tmp"),
+        ]
+        for d in subdirs:
+            try:
+                os.makedirs(d, exist_ok=True)
+            except Exception as e:
+                logging.debug(f"Could not create directory {d}: {e}")
 
     def SelectCTfile(self, event):
         """Open a file dialog to select a CT XML file and update the application state.
@@ -502,7 +537,7 @@ class MainPage(tk.Tk):
                 return
                 
             # Enable the settings button in all pages
-            for Page in ("DashboardPage", "DatabasePage", "GeoDataPage", "OperationPage"):
+            for Page in ("DashboardPage", "DatabasePage", "GeoDataPage", "OperationPage", "FootPrintsPage"):
                 try:
                     # Check if frame exists and widget is still valid
                     if (Page in self.frames and 
@@ -527,7 +562,7 @@ class MainPage(tk.Tk):
                 return
                 
             # Disable the settings button in all pages
-            for Page in ("DashboardPage", "DatabasePage", "GeoDataPage", "OperationPage"):
+            for Page in ("DashboardPage", "DatabasePage", "GeoDataPage", "OperationPage", "FootPrintsPage"):
                 try:
                     # Check if frame exists and widget is still valid
                     if (Page in self.frames and 
@@ -1034,19 +1069,23 @@ class DashboardPage(tk.Frame):
 
         # Load button images using CTkImage
         self.button_operations_img = Ctk.CTkImage(
-            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_operations.png"))
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_operations.png")),size=(21, 17)
         )
         self.button_geo_img = Ctk.CTkImage(
-            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_geo.png"))
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_geo.png")),size=(21, 17)
         )
         self.button_data_img = Ctk.CTkImage(
-            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_data.png"))
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_data.png")),size=(21, 17)
         )
         self.button_dash_img = Ctk.CTkImage(
-            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_dash.png"))
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_dash.png")),size=(21, 17)
         )
         self.button_settings_img = Ctk.CTkImage(
-            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_options.png"))
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_options.png")),size=(21, 17)
+        )
+        self.button_footprints_img = Ctk.CTkImage(
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_footprint.png")),
+            size=(21, 17)
         )
 
         self.button_operations = Ctk.CTkButton(
@@ -1064,6 +1103,23 @@ class DashboardPage(tk.Frame):
             text_color="#000000",
         )
         self.button_operations.place(x=0, y=397)
+
+        # New FootPrints navigation button
+        self.button_footprints = Ctk.CTkButton(
+            self,
+            text="FootPrints",
+            fg_color="#A1B9D0",
+            bg_color="#A1B9D0",
+            image=self.button_footprints_img,
+            height=33,
+            width=167,
+            command=lambda: controller.show_frame("FootPrintsPage"),
+            corner_radius=0,
+            hover_color="#7A92A9",
+            font=("Sans Font", 15),
+            text_color="#000000",
+        )
+        self.button_footprints.place(x=0, y=445)
 
         self.button_geo = Ctk.CTkButton(
             self,
@@ -1127,7 +1183,7 @@ class DashboardPage(tk.Frame):
             command=self.controller.SettingWindow,
         )
         self.button_settings.place(x=14, y=581)
-
+        
         self.canvas.create_rectangle(
             172.0, 0.0, 1152.0, 720.0, fill="#A1B9D0", outline=""
         )
@@ -1703,20 +1759,24 @@ class DatabasePage(tk.Frame):
 
         # Load button images using CTkImage
         self.button_operations_img = Ctk.CTkImage(
-            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_operations.png"))
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_operations.png")),size=(21, 17)
         )
         self.button_geo_img = Ctk.CTkImage(
-            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_geo.png"))
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_geo.png")),size=(21, 17)
         )
         self.button_data_img = Ctk.CTkImage(
-            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_data.png"))
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_data.png")),size=(21, 17)
         )
         self.button_dash_img = Ctk.CTkImage(
-            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_dash.png"))
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_dash.png")),size=(21, 17)
         )
         self.button_settings_img = Ctk.CTkImage(
-            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_options.png"))
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_options.png")),size=(21, 17)
         )
+        self.button_footprints_img = Ctk.CTkImage(
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_footprint.png")),
+            size=(21, 17)
+        ) 
 
         self.button_operations = Ctk.CTkButton(
             self,
@@ -1733,6 +1793,23 @@ class DatabasePage(tk.Frame):
             text_color="#000000",
         )
         self.button_operations.place(x=0, y=397)
+
+        # New FootPrints navigation button
+        self.button_footprints = Ctk.CTkButton(
+            self,
+            text="FootPrints",
+            fg_color="#A1B9D0",
+            bg_color="#A1B9D0",
+            image=self.button_footprints_img,
+            height=33,
+            width=167,
+            command=lambda: controller.show_frame("FootPrintsPage"),
+            corner_radius=0,
+            hover_color="#7A92A9",
+            font=("Sans Font", 15),
+            text_color="#000000",
+        )
+        self.button_footprints.place(x=0, y=445)
 
         self.button_geo = Ctk.CTkButton(
             self,
@@ -2490,19 +2567,23 @@ class GeoDataPage(tk.Frame):
 
         # Load button images using CTkImage
         self.button_operations_img = Ctk.CTkImage(
-            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_operations.png"))
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_operations.png")),size=(21, 17)
         )
         self.button_geo_img = Ctk.CTkImage(
-            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_geo.png"))
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_geo.png")),size=(21, 17)
         )
         self.button_data_img = Ctk.CTkImage(
-            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_data.png"))
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_data.png")),size=(21, 17)
         )
         self.button_dash_img = Ctk.CTkImage(
-            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_dash.png"))
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_dash.png")),size=(21, 17)
         )
         self.button_settings_img = Ctk.CTkImage(
-            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_options.png"))
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_options.png")),size=(21, 17)
+        )
+        self.button_footprints_img = Ctk.CTkImage(
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_footprint.png")),
+            size=(21, 17)
         )
 
         self.button_operations = Ctk.CTkButton(
@@ -2520,6 +2601,23 @@ class GeoDataPage(tk.Frame):
             text_color="#000000",
         )
         self.button_operations.place(x=0, y=397)
+
+        # New FootPrints navigation button
+        self.button_footprints = Ctk.CTkButton(
+            self,
+            text="FootPrints",
+            fg_color="#A1B9D0",
+            bg_color="#A1B9D0",
+            image=self.button_footprints_img,
+            height=33,
+            width=167,
+            command=lambda: controller.show_frame("FootPrintsPage"),
+            corner_radius=0,
+            hover_color="#7A92A9",
+            font=("Sans Font", 15),
+            text_color="#000000",
+        )
+        self.button_footprints.place(x=0, y=445)
 
         self.button_geo = Ctk.CTkButton(
             self,
@@ -2627,19 +2725,23 @@ class GeoDataPage(tk.Frame):
 
         # Load button images using CTkImage
         self.button_operations_img = Ctk.CTkImage(
-            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_operations.png"))
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_operations.png")),size=(21, 17)
         )
         self.button_geo_img = Ctk.CTkImage(
-            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_geo.png"))
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_geo.png")),size=(21, 17)
         )
         self.button_data_img = Ctk.CTkImage(
-            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_data.png"))
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_data.png")),size=(21, 17)
         )
         self.button_dash_img = Ctk.CTkImage(
-            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_dash.png"))
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_dash.png")),size=(21, 17)
         )
         self.button_settings_img = Ctk.CTkImage(
-            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_options.png"))
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_options.png")),size=(21, 17)
+        )
+        self.button_footprints_img = Ctk.CTkImage(
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_footprint.png")),
+            size=(21, 17)
         )
 
         self.button_operations = Ctk.CTkButton(
@@ -3453,19 +3555,23 @@ class OperationPage(tk.Frame):
 
         # Load button images using CTkImage
         self.button_operations_img = Ctk.CTkImage(
-            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_operations.png"))
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_operations.png")),size=(21, 17)
         )
         self.button_geo_img = Ctk.CTkImage(
-            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_geo.png"))
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_geo.png")),size=(21, 17)
         )
         self.button_data_img = Ctk.CTkImage(
-            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_data.png"))
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_data.png")),size=(21, 17)
         )
         self.button_dash_img = Ctk.CTkImage(
-            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_dash.png"))
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_dash.png")),size=(21, 17)
         )
         self.button_settings_img = Ctk.CTkImage(
-            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_options.png"))
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_options.png")),size=(21, 17)
+        )
+        self.button_footprints_img = Ctk.CTkImage(
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_footprint.png")),
+            size=(21, 17)
         )
 
         self.button_operations = Ctk.CTkButton(
@@ -3482,6 +3588,23 @@ class OperationPage(tk.Frame):
             text_color="#000000",
         )
         self.button_operations.place(x=0, y=397)
+
+        # New FootPrints navigation button
+        self.button_footprints = Ctk.CTkButton(
+            self,
+            text="FootPrints",
+            fg_color="#A1B9D0",
+            bg_color="#A1B9D0",
+            image=self.button_footprints_img,
+            height=33,
+            width=167,
+            command=lambda: controller.show_frame("FootPrintsPage"),
+            corner_radius=0,
+            hover_color="#7A92A9",
+            font=("Sans Font", 15),
+            text_color="#000000",
+        )
+        self.button_footprints.place(x=0, y=445)
 
         self.button_geo = Ctk.CTkButton(
             self,
@@ -5947,6 +6070,861 @@ class OperationPage(tk.Frame):
                 "Error",
                 f"Error browsing CT numbers: {str(e)}"
                 )
+    
+
+class FootPrintsPage(tk.Frame):
+    def __init__(self, parent, controller):
+        tk.Frame.__init__(self, parent)
+        self.controller = controller
+        self.configure(bg="#ffffff")
+
+        self.Body_font = Ctk.CTkFont(family="Inter", size=15)
+        self.Body_font_Bold = Ctk.CTkFont(family="Inter", size=15, weight="bold")
+        self.button_font = Ctk.CTkFont(family="Inter", size=12)
+
+        self.canvas = Canvas(
+            self,
+            bg="#FFFFFF",
+            height=720,
+            width=1152,
+            bd=0,
+            highlightthickness=0,
+            relief="ridge",
+        )
+        self.canvas.place(x=0, y=0)
+        self.canvas.create_rectangle(0.0, 0.0, 204.0, 720.0, fill="#A0B9D0", outline="")
+
+        # Left navigation buttons (match style)
+        self.button_operations_img = Ctk.CTkImage(
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_operations.png"))
+        )
+        self.button_geo_img = Ctk.CTkImage(
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_geo.png"))
+        )
+        self.button_data_img = Ctk.CTkImage(
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_data.png"))
+        )
+        self.button_dash_img = Ctk.CTkImage(
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_dash.png"))
+        )
+        self.button_settings_img = Ctk.CTkImage(
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_options.png"))
+        )
+        self.button_footprints_img = Ctk.CTkImage(
+            light_image=Image.open(str(self.controller.ASSETS_PATH / "button_footprint.png")),
+            size=(21, 17)
+        )
+
+        self.button_operations = Ctk.CTkButton(
+            self,
+            text="Operations",
+            fg_color="#A1B9D0",
+            bg_color="#A1B9D0",
+            image=self.button_operations_img,
+            height=33,
+            width=167,
+            command=lambda: controller.show_frame("OperationPage"),
+            corner_radius=0,
+            hover_color="#7A92A9",
+            font=("arial", 15),
+            text_color="#000000",
+        )
+        self.button_operations.place(x=0, y=397)
+
+        self.button_geo = Ctk.CTkButton(
+            self,
+            text="GeoData",
+            fg_color="#A1B9D0",
+            bg_color="#A1B9D0",
+            image=self.button_geo_img,
+            height=33,
+            width=167,
+            command=lambda: controller.show_frame("GeoDataPage"),
+            corner_radius=0,
+            hover_color="#7A92A9",
+            font=("Sans Font", 15),
+            text_color="#000000",
+        )
+        self.button_geo.place(x=0, y=349)
+
+        self.button_data = Ctk.CTkButton(
+            self,
+            text="Database",
+            fg_color="#A1B9D0",
+            bg_color="#A1B9D0",
+            image=self.button_data_img,
+            height=33,
+            width=167,
+            command=lambda: controller.show_frame("DatabasePage"),
+            corner_radius=0,
+            hover_color="#7A92A9",
+            font=("Sans Font", 15),
+            text_color="#000000",
+        )
+        self.button_data.place(x=0, y=297)
+
+        self.button_dash = Ctk.CTkButton(
+            self,
+            text="DashBoard",
+            fg_color="#A1B9D0",
+            bg_color="#A1B9D0",
+            image=self.button_dash_img,
+            height=33,
+            width=167,
+            corner_radius=0,
+            hover_color="#7A92A9",
+            font=("Sans Font", 15),
+            text_color="#000000",
+            command=lambda: controller.show_frame("DashboardPage"),
+        )
+        self.button_dash.place(x=0, y=248)
+
+        # Active page
+        self.button_footprints = Ctk.CTkButton(
+            self,
+            text="FootPrints",
+            fg_color="#7A92A9",
+            bg_color="#7A92A9",
+            image=self.button_footprints_img,
+            height=33,
+            width=167,
+            hover=False,
+            corner_radius=0,
+            font=("Sans Font", 15),
+            text_color="#000000",
+        )
+        self.button_footprints.place(x=0, y=445)
+
+        self.button_settings = Ctk.CTkButton(
+            self,
+            text="More\nSettings",
+            fg_color="#778593",
+            bg_color="#A1B9D0",
+            image=self.button_settings_img,
+            height=97,
+            width=125,
+            corner_radius=20,
+            hover=False,
+            font=("Sans Font", 16),
+            text_color="#000000",
+            command=self.controller.SettingWindow,
+        )
+        self.button_settings.place(x=14, y=581)
+
+        # Main area styling
+
+        # Background images (match other pages)
+        try:
+            self.fp_bg_img = PhotoImage(file=str(self.controller.ASSETS_PATH / "image_BG.png"))
+            self.canvas.create_image(659.0, 360.0, image=self.fp_bg_img)
+            self.fp_bg_mask = PhotoImage(file=str(self.controller.ASSETS_PATH / "image_BG_mask.png"))
+            self.canvas.create_image(659.0, 360.0, image=self.fp_bg_mask)
+            # Draw footprints container on top of background
+            self.rectangle_footprint = PhotoImage(file=str(self.controller.ASSETS_PATH / "Rectrangle_Footprint.png"))
+            self.rectangle_footprint_item = self.canvas.create_image(667.0, 286.0, image=self.rectangle_footprint)
+            # Ensure Benchmark Sims visuals are present (logo + titles)
+            self.fp_logo = PhotoImage(file=str(self.controller.ASSETS_PATH / "image_Logo.png"))
+            self.fp_logo_item = self.canvas.create_image(89.0, 39.0, image=self.fp_logo)
+            try:
+                self.fp_welcome = PhotoImage(file=str(self.controller.ASSETS_PATH / "image_Welcome.png"))
+                self.fp_welcome_item = self.canvas.create_image(84.0, 82.0, image=self.fp_welcome)
+            except Exception:
+                self.fp_welcome_item = None
+            try:
+                self.fp_name = PhotoImage(file=str(self.controller.ASSETS_PATH / "image_Name.png"))
+                self.fp_name_item = self.canvas.create_image(84.0, 116.0, image=self.fp_name)
+            except Exception:
+                self.fp_name_item = None
+        except Exception:
+            pass
+
+        # Title
+        self.canvas.create_rectangle(247.0, 90.0, 1094.0, 91.0, fill="#000000", outline="")
+        try:
+            self.image_image_footprints = PhotoImage(file=str(self.controller.ASSETS_PATH / "image_Features.png"))
+            self.canvas.create_image(259.0, 74.0, image=self.image_image_footprints)
+        except Exception:
+            pass
+        self.canvas.create_text(280.0, 68.0, anchor="nw", text="FootPrints", fill="#000000", font=("Inter", 15 * -1))
+
+        # Section header for AOI / Map (moved down to avoid overlap with title)
+        self.canvas.create_rectangle(247.0, 126.0, 1094.0, 127.0, fill="#000000", outline="")
+        self.canvas.create_text(250.0, 104.0, anchor="nw", text="Area of Interest", fill="#000000", font=("Inter", 15 * -1))
+
+        # Coordinate inputs
+        self.canvas.create_text(247.0, 142.0, anchor="nw", text="Top-left (lat,lon)", fill="#000000", font=("Inter", 12 * -1))
+        self.fp_top_left_entry = Ctk.CTkEntry(self, width=210, height=18, border_color="#D5E3F0", text_color="#565454")
+        self.fp_top_left_entry.place(x=350, y=140)
+
+        self.canvas.create_text(580.0, 142.0, anchor="nw", text="Bottom-right (lat,lon)", fill="#000000", font=("Inter", 12 * -1))
+        self.fp_bottom_right_entry = Ctk.CTkEntry(self, width=210, height=18, border_color="#D5E3F0", text_color="#565454")
+        self.fp_bottom_right_entry.place(x=710, y=140)
+
+        # State and status
+        self.fp_top_left = None
+        self.fp_bottom_right = None
+        self.fp_status_label = Ctk.CTkLabel(self, text="", bg_color="#F8F9FB")
+        self.fp_status_label.place(x=250, y=155)
+
+        # Actions for coords
+        self.fp_update_btn = Ctk.CTkButton(self, text="Update BBox", fg_color="#8DBBE7", width=80, height=20, command=self._on_update_bbox)
+        self.fp_update_btn.place(x=930, y=140)
+        self.fp_fit_btn = Ctk.CTkButton(self, text="Fit BBox", fg_color="#A7A7A7", width=70, height=20, state="disabled")
+        self.fp_fit_btn.place(x=1022, y=140)
+
+        # Bind entry events
+        self.fp_top_left_entry.bind("<FocusOut>", lambda e: self._on_update_bbox())
+        self.fp_top_left_entry.bind("<Return>", lambda e: self._on_update_bbox())
+        self.fp_bottom_right_entry.bind("<FocusOut>", lambda e: self._on_update_bbox())
+        self.fp_bottom_right_entry.bind("<Return>", lambda e: self._on_update_bbox())
+
+        # Map region: try to use tkintermapview; fallback to matplotlib
+        self.canvas.create_text(250.0, 180.0, anchor="nw", text="Area of Interest Map", fill="#000000", font=("Inter", 14 * -1))
+        self._map_mode = None
+        self._bbox_polygon = None
+        try:
+            from tkintermapview import TkinterMapView  # type: ignore
+            self.map_widget = TkinterMapView(self, corner_radius=0)
+            self.map_widget.place(x=247.0, y=200.0, width=847.0, height=290.0)
+            self.map_widget.set_zoom(5)
+            self.map_widget.set_position(31.0, 34.8)  # default center
+            self._map_mode = "tkmap"
+            
+            # Tile source selector (OSM/Google)
+            try:
+                self.tile_source_var = tk.StringVar(value="Google Road")
+                self.tile_source_menu = Ctk.CTkOptionMenu(self, width=130, height=18, fg_color="#D5E3F0", text_color="#565454", variable=self.tile_source_var, values=["Google Road", "Google Satellite", "Google Hybrid", "Google Terrain", "OSM"], command=lambda s: self._set_map_tile_source(s))
+                self.tile_source_menu.place(x=963, y=180)
+            except Exception:
+                pass
+            # Default to Google Road tiles if allowed
+            self._set_map_tile_source("Google Road")
+            # Enable fit button for tkmap once bbox valid
+            self.fp_fit_btn.configure(state="disabled")
+            self.fp_fit_btn.configure(command=self._fit_map_to_bbox)
+        except Exception:
+            # No fallback: require tkintermapview
+            self._map_mode = "missing"
+            try:
+                self.map_hint = Ctk.CTkLabel(self, text="Interactive map unavailable. Install: pip install tkintermapview", bg_color="#F8F9FB", text_color="#565454")
+                self.map_hint.place(x=250, y=470)
+                self.map_install_btn = Ctk.CTkButton(self, text="Install Map Support", fg_color="#8DBBE7", width=150, height=20, command=self._install_map_support)
+                self.map_install_btn.place(x=720, y=468)
+                self.fp_fit_btn.configure(state="disabled")
+            except Exception:
+                pass
+
+        # Microsoft panel (left) with image banner
+        try:
+            self.image_ms = PhotoImage(file=str(self.controller.ASSETS_PATH / "image_Microsoft_Footprint.png"))
+            self.canvas.create_image(667.0, 631.0, image=self.image_ms)
+
+        except Exception:
+            pass
+        # Microsoft controls aligned horizontally under map (left side)
+        self.ms_location_entry = Ctk.CTkEntry(self, width=200, height=18, border_color="#D5E3F0", placeholder_text="Country/Location")
+        self.ms_location_entry.place(x=380, y=617)
+        self.ms_divide_switch = Ctk.CTkSwitch(self, text="Divide after download", onvalue=1, offvalue=0, text_color="#565454", bg_color="#FDFBFC")
+        self.ms_divide_switch.place(x=605, y=616)
+        self.ms_download_btn = Ctk.CTkButton(self, text="Download", fg_color="#8DBBE7", width=90, height=20, command=self._ms_download)
+        self.ms_download_btn.place(x=790, y=617)
+
+        # Google panel with image banner
+        try:
+            self.image_geo = PhotoImage(file=str(self.controller.ASSETS_PATH / "image_Google_Footprint.png"))
+            self.canvas.create_image(667.0, 581.0, image=self.image_geo)
+        except Exception:
+            pass
+        # Google controls aligned horizontally under map (right side)
+        self.gg_select_btn = Ctk.CTkButton(self, text="Browse...", fg_color="#8DBBE7", width=80, height=20, command=self._gg_browse)
+        self.gg_select_btn.place(x=465, y=568)
+        self.gg_source_label = Ctk.CTkLabel(self, text="No source selected", text_color="#565454", bg_color="#FDFBFC")
+        self.gg_source_label.place(x=555, y=565)
+        self.gg_tile_entry = Ctk.CTkEntry(self, width=130, height=19, border_color="#D5E3F0", placeholder_text="Tile ID")
+        self.gg_tile_entry.place(x=970, y=567)
+        self.gg_divide_btn = Ctk.CTkButton(self, text="Divide", fg_color="#8DBBE7", width=70, height=20, command=self._gg_divide)
+        self.gg_divide_btn.place(x=390, y=568)
+
+        # Save options
+        try:
+            self.image_save = PhotoImage(file=str(self.controller.ASSETS_PATH / "image_Saving_Footprint.png"))
+            self.canvas.create_image(667.0, 682.0, image=self.image_save)
+        except Exception:
+            pass
+        # self.canvas.create_text(250.0, 525.0, anchor="nw", text="Saving", fill="#000000", font=("Inter", 14 * -1))
+        # Save folder (Google row) aligned horizontally
+        self.fp_save_browse = Ctk.CTkButton(self, text="Saving Path", fg_color="#8DBBE7", width=100, height=20, command=self._fp_browse_save)
+        self.fp_save_browse.place(x=705, y=667)
+        # Internal holder for selected saving path (no visible label to save space)
+        self.fp_save_path = ""
+
+        # Saving row aligned
+        self.canvas.create_text(375.0, 670.0, anchor="nw", text="File Name", fill="#000000", font=("Inter", 12 * -1))
+        self.fp_filename_entry = Ctk.CTkEntry(self, width=150, height=18, border_color="#D5E3F0", placeholder_text="buildings.geojson")
+        self.fp_filename_entry.place(x=445, y=667.0)
+        self.fp_extrafields = Ctk.CTkCheckBox(self, text="extra fields", text_color="#565454", bg_color="#FDFBFC")
+        self.fp_extrafields.place(x=605, y=667.0)
+
+        # Extraction source selector and action button
+        try:
+            self.extract_source = Ctk.CTkSegmentedButton(
+                self,
+                values=["Microsoft", "Google"],
+                fg_color="#D5E3F0",
+                unselected_color="#D5E3F0",
+                selected_color="#8DBBE7",
+                height=20,
+                width=160,
+                text_color="#565454",
+                dynamic_resizing=False,
+            )
+            self.extract_source.place(x=821, y=667)
+            self.extract_source.set("Google")
+        except Exception:
+            self.extract_source = None
+
+        self.extract_run_btn = Ctk.CTkButton(self, text="Extraction", fg_color="#D5E3F0",bg_color="#f0f0f0",text_color="#000000",
+                                              width=100, height=29, corner_radius=20, command=self._run_extraction)
+        self.extract_run_btn.place(x=1000, y=664)
+
+        # Placeholders for later wiring of events and algorithms
+        self.gg_selected_source = None
+        self.gg_use_chunks = False
+        self.ms_last_output_dir = None
+        self.gg_last_output_dir = None
+
+        # Finally ensure Benchmark Sims logo is on top
+        try:
+            # Lift in correct z-order: logo above name above welcome
+            if hasattr(self, 'fp_welcome_item') and self.fp_welcome_item:
+                self.canvas.lift(self.fp_welcome_item)
+            if hasattr(self, 'fp_name_item') and self.fp_name_item:
+                self.canvas.lift(self.fp_name_item)
+            if hasattr(self, 'fp_logo_item') and self.fp_logo_item:
+                self.canvas.lift(self.fp_logo_item)
+        except Exception:
+            pass
+
+    # ===== Save helpers =====
+    def _default_save_dir(self, provider):
+        root = self.controller._get_footprints_root()
+        if provider == "microsoft":
+            loc = (self.ms_location_entry.get() or "").strip()
+            if not loc:
+                loc = "default"
+            out = os.path.join(root, "microsoft", loc)
+        else:
+            out = os.path.join(root, "google")
+        try:
+            os.makedirs(out, exist_ok=True)
+        except Exception:
+            pass
+        return out
+
+    def _ensure_output_path(self, provider):
+        path = (getattr(self, 'fp_save_path', '') or "").strip()
+        if not path:
+            path = self._default_save_dir(provider)
+            try:
+                self.fp_save_path = path
+            except Exception:
+                pass
+        try:
+            os.makedirs(path, exist_ok=True)
+        except Exception:
+            pass
+        return path
+
+    def _compose_output_file(self, provider):
+        folder = self._ensure_output_path(provider)
+        name = (self.fp_filename_entry.get() or "buildings.geojson").strip()
+        if not name.lower().endswith(".geojson"):
+            name += ".geojson"
+        return os.path.join(folder, name)
+
+    def _fp_browse_save(self):
+        try:
+            folder = tkinter.filedialog.askdirectory()
+            if folder:
+                self.fp_save_path = folder
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Browse save failed: {e}")
+
+    # ===== Microsoft actions =====
+    def _ms_download(self):
+        try:
+            from processing_window import run_with_processing
+        except Exception as e:
+            return messagebox.showerror("Error", f"Processing window not available: {e}")
+        location = (self.ms_location_entry.get() or "").strip()
+        if not location:
+            return messagebox.showwarning("Missing Input", "Please enter a Microsoft location (country)")
+        divide_flag = bool(self.ms_divide_switch.get())
+        if not divide_flag:
+            if not messagebox.askyesno("Not Dividing?", "You chose not to divide the dataset. Extraction may be significantly slower. Continue?"):
+                return
+        output_dir = os.path.join(self.controller._get_footprints_root(), "microsoft", location)
+        try:
+            os.makedirs(output_dir, exist_ok=True)
+        except Exception:
+            pass
+
+        err_holder = {"msg": None}
+
+        def task(win):
+            try:
+                import threading
+                cancel_event = threading.Event()
+                # stash on self to allow external cancel (ProcessingWindow should wire a cancel button)
+                self._ms_cancel_event = cancel_event
+                import building_extractor as be
+                outdir = be.download_ms_dataset(self.controller._get_root_dir(), location, divide_flag, cancel_event=cancel_event)
+                return True
+            except Exception as e:
+                err_text = str(e)
+                err_holder["msg"] = err_text
+                logging.getLogger(__name__).error(f"MS download error: {err_text}")
+                # Re-raise to allow processing window to stop immediately
+                raise
+
+        try:
+            res = run_with_processing(parent=self.controller, task_function=task, title="Microsoft Download", message=f"Downloading {location}...")
+        except Exception as e:
+            # Surface common public access error or detailed message
+            msg = str(e)
+            if "Public access is not permitted" in msg or "HTTP Error 409" in msg:
+                messagebox.showerror("Download Error", "Microsoft dataset links are not accessible (HTTP 409). Please try again later or check network/policy.")
+            else:
+                messagebox.showerror("Download Error", msg)
+            return
+
+        # If operation did not succeed and no exception was propagated, still inform the user
+        if not res:
+            msg = err_holder.get("msg") or "Download was cancelled or failed. Please check the location spelling or logs for details."
+            if "Public access is not permitted" in msg or "HTTP Error 409" in msg:
+                messagebox.showerror("Download Error", "Microsoft dataset links are not accessible (HTTP 409). Please try again later or check network/policy.")
+            else:
+                messagebox.showerror("Download Error", msg)
+            return
+        if res:
+            self.ms_last_output_dir = output_dir
+            messagebox.showinfo("Success", f"Downloaded data for {location} into:\n{output_dir}")
+
+    def _ms_extract(self):
+        if not (self.fp_top_left and self.fp_bottom_right):
+            return messagebox.showwarning("Invalid BBox", "Please enter valid coordinates and update BBox.")
+        location = (self.ms_location_entry.get() or "").strip()
+        if not location:
+            return messagebox.showwarning("Missing Input", "Please enter a Microsoft location (country)")
+        # Resolve best source under footprints/microsoft/<location>
+        kind, path = self._resolve_ms_input(location)
+        if not kind:
+            logging.getLogger(__name__).error(f"Microsoft dataset not found: {location}")
+            return messagebox.showerror("Not Found", f"No dataset found for '{location}' under footprints/microsoft.")
+        output_file = self._compose_output_file("microsoft")
+        extrafields = bool(self.fp_extrafields.get())
+        tl = [float(self.fp_top_left[0]), float(self.fp_top_left[1])]
+        br = [float(self.fp_bottom_right[0]), float(self.fp_bottom_right[1])]
+        try:
+            from processing_window import run_with_processing
+        except Exception as e:
+            return messagebox.showerror("Error", f"Processing window not available: {e}")
+
+        def task(win):
+            try:
+                from building_extractor import extract_ms_divided, extract_ms_combined
+                if kind == "divided":
+                    return extract_ms_divided(path, output_file, tl, br, extrafields)
+                else:
+                    return extract_ms_combined(path, output_file, tl, br, extrafields)
+            except Exception as e:
+                logging.getLogger(__name__).error(f"MS extract error: {e}")
+                raise
+
+        res = run_with_processing(parent=self.controller, task_function=task, title="Microsoft Extract", message="Extracting AOI from dataset...")
+        if res:
+            count = res.get("count") if isinstance(res, dict) else None
+            logging.getLogger(__name__).info(f"Microsoft extraction completed. Output: {output_file}, Buildings: {count}")
+            if count is not None:
+                messagebox.showinfo("Extraction Completed", f"Saved AOI to:\n{output_file}\nBuildings extracted: {count}")
+            else:
+                messagebox.showinfo("Extraction Completed", f"Saved AOI to:\n{output_file}")
+
+    # ===== Google actions =====
+    def _gg_browse(self):
+        try:
+            # Single dialog: pick a CSV file; cancel means do nothing
+            path = tkinter.filedialog.askopenfilename(filetypes=[("CSV files", "*.csv")])
+            if not path:
+                # Cancelled
+                return
+            self._set_google_source(path)
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Browse error: {e}")
+
+    def _set_google_source(self, path):
+        self.gg_selected_source = path
+        self.gg_use_chunks = os.path.isdir(path)
+        try:
+            self.gg_source_label.configure(text=path)
+        except Exception:
+            pass
+        # Try to infer tile id into field if CSV
+        if not self.gg_use_chunks and path:
+            base = os.path.basename(path)
+            # Expect format like TILEID_buildings.csv
+            if "_buildings" in base:
+                tid = base.split("_buildings")[0]
+                self.gg_tile_entry.delete(0, tk.END)
+                self.gg_tile_entry.insert(0, tid)
+
+    def _gg_divide(self):
+        tile_id = (self.gg_tile_entry.get() or "").strip()
+        if not tile_id:
+            return messagebox.showwarning("Missing Input", "Please select or enter a tile ID to divide")
+        # Determine destination directory under root/footprints/google/<tile_id>
+        fp_google_root = os.path.join(self.controller._get_footprints_root(), "google")
+        dest_dir = os.path.join(fp_google_root, tile_id)
+        try:
+            os.makedirs(dest_dir, exist_ok=True)
+        except Exception:
+            pass
+        # If a CSV was browsed, copy it into destination as <tile_id>_buildings.csv
+        if getattr(self, 'gg_selected_source', None) and os.path.isfile(self.gg_selected_source):
+            try:
+                import shutil
+                src_csv = self.gg_selected_source
+                dst_csv = os.path.join(dest_dir, f"{tile_id}_buildings.csv")
+                shutil.copy2(src_csv, dst_csv)
+                # Ensure tiles.geojson is available at root/footprints/google/tiles.geojson
+                src_tiles = os.path.join(os.path.dirname(src_csv), "tiles.geojson")
+                root_tiles = os.path.join(fp_google_root, "tiles.geojson")
+                if os.path.isfile(src_tiles) and not os.path.isfile(root_tiles):
+                    try:
+                        shutil.copy2(src_tiles, root_tiles)
+                    except Exception as e:
+                        logging.getLogger(__name__).warning(f"Failed to copy tiles.geojson to google root: {e}")
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"Failed to stage CSV/tiles for divide: {e}")
+        # Use destination directory for division
+        csv_dir = dest_dir
+
+        try:
+            from processing_window import run_with_processing
+        except Exception as e:
+            return messagebox.showerror("Error", f"Processing window not available: {e}")
+
+        def task(win):
+            try:
+                import threading
+                self._gg_cancel_event = threading.Event()
+                from building_extractor import divide_google_tile
+                # Verify tiles.geojson is present either at root/footprints/google or next to CSV
+                google_root = fp_google_root
+                root_tiles = os.path.join(google_root, "tiles.geojson")
+                local_tiles = os.path.join(csv_dir, "tiles.geojson")
+                if not (os.path.isfile(root_tiles) or os.path.isfile(local_tiles)):
+                    logging.getLogger(__name__).error("tiles.geojson not found in expected locations")
+                    messagebox.showerror("Missing tiles.geojson", "tiles.geojson was not found in root/footprints/google/ or next to the CSV. Operation cancelled.")
+                    return False
+                divide_google_tile(csv_dir, tile_id, google_root=google_root)
+                return True
+            except Exception:
+                raise
+
+        res = run_with_processing(parent=self.controller, task_function=task, title="Google Divide", message=f"Dividing tile {tile_id} into chunks...")
+        if res:
+            outdir = os.path.join(csv_dir, f"{tile_id}_chunks")
+            self.gg_last_output_dir = outdir
+            messagebox.showinfo("Success", f"Chunks written to:\n{outdir}")
+
+    def _gg_extract(self):
+        if not (self.fp_top_left and self.fp_bottom_right):
+            return messagebox.showwarning("Invalid BBox", "Please enter valid coordinates and update BBox.")
+        # Determine source: prefer user-browsed CSV; else dataset name entry under footprints/google/<name>
+        use_chunks, input_path = self._resolve_google_source()
+        if not input_path:
+            logging.getLogger(__name__).error("Google dataset not found")
+            return messagebox.showerror("Not Found", "No Google dataset found. Browse a CSV or enter a dataset/tile name present in footprints/google.")
+        output_file = self._compose_output_file("google")
+        extrafields = bool(self.fp_extrafields.get())
+        tl = (float(self.fp_top_left[0]), float(self.fp_top_left[1]))
+        br = (float(self.fp_bottom_right[0]), float(self.fp_bottom_right[1]))
+        try:
+            from processing_window import run_with_processing
+        except Exception as e:
+            return messagebox.showerror("Error", f"Processing window not available: {e}")
+
+        def task(win):
+            try:
+                from building_extractor import extract_google
+                return extract_google(use_chunks, input_path, output_file, tl, br, extrafields)
+            except Exception as e:
+                logging.getLogger(__name__).error(f"Google extract error: {e}")
+                raise
+
+        res = run_with_processing(parent=self.controller, task_function=task, title="Google Extract", message="Filtering polygons in AOI...")
+        if res:
+            count = res.get("count") if isinstance(res, dict) else None
+            logging.getLogger(__name__).info(f"Google extraction completed. Output: {output_file}, Buildings: {count}")
+            if count is not None:
+                messagebox.showinfo("Extraction Completed", f"Saved AOI to:\n{output_file}\nBuildings extracted: {count}")
+            else:
+                messagebox.showinfo("Extraction Completed", f"Saved AOI to:\n{output_file}")
+
+    def _resolve_ms_input(self, location):
+        from building_extractor import resolve_ms_input
+        return resolve_ms_input(self.controller._get_root_dir(), location)
+
+    def _resolve_google_source(self):
+        from building_extractor import resolve_google_source
+        # Priority: entry tile ID under root/footprints/google/<id> → browsed file
+        tile_id = (self.gg_tile_entry.get() if hasattr(self, 'gg_tile_entry') else None)
+        # If tile_id present, attempt to resolve under roots first
+        use_chunks, input_path = resolve_google_source(self.controller._get_root_dir(), None, tile_id)
+        if use_chunks is not None and input_path:
+            return use_chunks, input_path
+        # Fallback to browsed source
+        return resolve_google_source(self.controller._get_root_dir(), self.gg_selected_source, None)
+    
+    def _fit_map_to_bbox(self):
+        if not (self.fp_top_left and self.fp_bottom_right):
+            return
+        top_lat, left_lon = self.fp_top_left
+        bottom_lat, right_lon = self.fp_bottom_right
+        # Normalize order
+        min_lon = min(left_lon, right_lon)
+        max_lon = max(left_lon, right_lon)
+        min_lat = min(bottom_lat, top_lat)
+        max_lat = max(bottom_lat, top_lat)
+        center_lat = (min_lat + max_lat) / 2.0
+        center_lon = (min_lon + max_lon) / 2.0
+        if self._map_mode == "tkmap":
+            try:
+                self.map_widget.set_position(center_lat, center_lon)
+                zoom = self._estimate_zoom(max_lat - min_lat, max_lon - min_lon)
+                self.map_widget.set_zoom(zoom)
+            except Exception:
+                pass
+        else:
+            return
+
+    def _estimate_zoom(self, dlat, dlon):
+        try:
+            span = max(abs(dlat), abs(dlon))
+            if span <= 0.05:
+                return 15
+            if span <= 0.1:
+                return 14
+            if span <= 0.25:
+                return 13
+            if span <= 0.5:
+                return 12
+            if span <= 1.0:
+                return 11
+            if span <= 2.0:
+                return 10
+            if span <= 4.0:
+                return 9
+            if span <= 8.0:
+                return 8
+            if span <= 16.0:
+                return 7
+            if span <= 32.0:
+                return 6
+            if span <= 64.0:
+                return 5
+            return 4
+        except Exception:
+            return 8
+
+    def _set_map_tile_source(self, selection):
+        """Set tile server for tkintermapview to Google or OSM."""
+        if self._map_mode != "tkmap":
+            return
+        try:
+            # Google tile variants
+            if selection == "Google Road":
+                url = "https://mt1.google.com/vt/lyrs=r&x={x}&y={y}&z={z}"
+            elif selection == "Google Satellite":
+                url = "https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}"
+            elif selection == "Google Hybrid":
+                url = "https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}"
+            elif selection == "Google Terrain":
+                url = "https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}"
+            else:
+                url = None
+
+            if url:
+                # Use Google tile server (subject to provider terms)
+                self.map_widget.set_tile_server(url, tile_size=256, max_zoom=22)
+            else:
+                # Default OSM
+                self.map_widget.set_tile_server("https://a.tile.openstreetmap.org/{z}/{x}/{y}.png", tile_size=256, max_zoom=19)
+        except Exception as _e:
+            logging.getLogger(__name__).warning(f"Tile server set failed: {_e}")
+
+    def _install_map_support(self):
+        """Attempt to install tkintermapview at runtime (Windows) and prompt restart."""
+        try:
+            import subprocess, sys
+            cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "tkintermapview"]
+            subprocess.check_call(cmd)
+            messagebox.showinfo("Installation", "tkintermapview installed. Please restart the application to enable the interactive map.")
+        except Exception as e:
+            messagebox.showerror("Installation Error", f"Failed to install tkintermapview.\nYou can install manually:\npython -m pip install tkintermapview\nError: {e}")
+
+    def _run_extraction(self):
+        """Run extraction based on selector (Microsoft/Google) using saving options."""
+        try:
+            source = self.extract_source.get() if self.extract_source else "Google"
+        except Exception:
+            source = "Google"
+        if source == "Microsoft":
+            return self._ms_extract()
+        else:
+            return self._gg_extract()
+
+    
+    def _on_update_bbox(self):
+        """Parse coordinate fields, validate, and update status. Map overlay added later."""
+        try:
+            top_left_text = self.fp_top_left_entry.get().strip()
+            bottom_right_text = self.fp_bottom_right_entry.get().strip()
+
+            # If a WKT polygon is pasted in either field, parse bounds and populate both
+            if self._looks_like_wkt_polygon(top_left_text) or self._looks_like_wkt_polygon(bottom_right_text):
+                bbox = self._parse_wkt_bounds(top_left_text if self._looks_like_wkt_polygon(top_left_text) else bottom_right_text)
+                if bbox:
+                    minx, miny, maxx, maxy = bbox
+                    # Top-left (lat,lon) => (maxy, minx); Bottom-right (lat,lon) => (miny, maxx)
+                    self.fp_top_left_entry.delete(0, tk.END)
+                    self.fp_top_left_entry.insert(0, f"{maxy:.6f},{minx:.6f}")
+                    self.fp_bottom_right_entry.delete(0, tk.END)
+                    self.fp_bottom_right_entry.insert(0, f"{miny:.6f},{maxx:.6f}")
+                    top_left_text = self.fp_top_left_entry.get().strip()
+                    bottom_right_text = self.fp_bottom_right_entry.get().strip()
+
+            top_left = self._parse_coord_string(top_left_text)
+            bottom_right = self._parse_coord_string(bottom_right_text)
+
+            if top_left is None or bottom_right is None:
+                self._set_status("Invalid coordinates", ok=False)
+                self.fp_top_left = None
+                self.fp_bottom_right = None
+                return
+
+            if not self._valid_latlon(*top_left) or not self._valid_latlon(*bottom_right):
+                self._set_status("Coordinates out of range", ok=False)
+                self.fp_top_left = None
+                self.fp_bottom_right = None
+                return
+
+            self.fp_top_left = top_left
+            self.fp_bottom_right = bottom_right
+            self._set_status("BBox valid", ok=True)
+            # Draw/refresh bbox overlay
+            self._draw_bbox_overlay()
+            # Enable fit button
+            try:
+                self.fp_fit_btn.configure(state="normal")
+            except Exception:
+                pass
+            logging.getLogger(__name__).info(f"Updated AOI bbox: TL={self.fp_top_left}, BR={self.fp_bottom_right}")
+            # Auto-fit to bbox for immediate feedback
+            self._fit_map_to_bbox()
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"BBox update failed: {e}")
+            self._set_status("Error parsing coords", ok=False)
+
+    def _set_status(self, text, ok=True):
+        try:
+            self.fp_status_label.configure(text=text)
+            self.fp_status_label.configure(text_color="#0a7f00" if ok else "#a40000")
+        except Exception:
+            pass
+
+    def _parse_coord_string(self, value):
+        """Return (lat, lon) or None. Supports 'lat,lon', 'lat lon', and 'Point(lon lat)'."""
+        if not value:
+            return None
+        s = value.strip()
+        # Try comma-separated
+        for sep in [",", " "]:
+            try:
+                if sep in s:
+                    parts = [p.strip().strip("()") for p in s.split(sep) if p.strip()]
+                    if len(parts) == 2:
+                        lat = float(parts[0])
+                        lon = float(parts[1])
+                        # If looks like lon,lat (first outside lat range and second valid lat), swap
+                        if (abs(lat) > 90 and abs(lon) <= 90) or (abs(lat) <= 90 and abs(lon) > 180):
+                            lon, lat = lat, lon
+                        return (lat, lon)
+            except Exception:
+                pass
+        # Try POINT WKT like 'Point (lon lat)'
+        try:
+            import re
+            m = re.search(r"point\s*\(\s*([-+]?\d*\.?\d+)\s+([-+]?\d*\.?\d+)\s*\)", s, re.IGNORECASE)
+            if m:
+                lon = float(m.group(1))
+                lat = float(m.group(2))
+                return (lat, lon)
+        except Exception:
+            pass
+        return None
+
+    def _looks_like_wkt_polygon(self, value):
+        if not value:
+            return False
+        v = value.strip().upper()
+        return v.startswith("POLYGON(") or v.startswith("MULTIPOLYGON(")
+
+    def _parse_wkt_bounds(self, wkt_text):
+        """Return (minx, miny, maxx, maxy) from WKT polygon if shapely is available."""
+        try:
+            from shapely import wkt as _wkt
+            geom = _wkt.loads(wkt_text)
+            return geom.bounds
+        except Exception:
+            return None
+
+    def _valid_latlon(self, lat, lon):
+        try:
+            return -90.0 <= float(lat) <= 90.0 and -180.0 <= float(lon) <= 180.0
+        except Exception:
+            return False
+
+    def _draw_bbox_overlay(self):
+        if not (self.fp_top_left and self.fp_bottom_right):
+            return
+        top_lat, left_lon = self.fp_top_left
+        bottom_lat, right_lon = self.fp_bottom_right
+        min_lon = min(left_lon, right_lon)
+        max_lon = max(left_lon, right_lon)
+        min_lat = min(bottom_lat, top_lat)
+        max_lat = max(bottom_lat, top_lat)
+
+        if self._map_mode == "tkmap":
+            try:
+                # Remove previous polygon if exists
+                if self._bbox_polygon is not None:
+                    try:
+                        self._bbox_polygon.delete()
+                    except Exception:
+                        pass
+                    self._bbox_polygon = None
+                # TkinterMapView expects list of (lat, lon)
+                coords = [
+                    (max_lat, min_lon),
+                    (max_lat, max_lon),
+                    (min_lat, max_lon),
+                    (min_lat, min_lon),
+                ]
+                self._bbox_polygon = self.map_widget.set_polygon(coords, outline_color="#C40000", fill_color="#C40000", border_width=2, name="AOI")
+            except Exception:
+                pass
 
 if __name__ == "__main__":
     app = MainPage()

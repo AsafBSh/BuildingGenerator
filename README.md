@@ -1,4 +1,4 @@
-# Building Generator v1.5
+# Building Generator v2.0
 
 A powerful Python application for generating and managing building footprints for Falcon BMS simulation environments. This tool processes geospatial data from various sources and generates buildings compatible with Falcon BMS theaters.
 
@@ -19,6 +19,14 @@ A powerful Python application for generating and managing building footprints fo
 - **Batch Processing**: Process multiple datasets efficiently
 - **Backup Management**: Automatic backup of original BMS files
 - **Real-time Preview**: 2D and 3D visualization of generated buildings
+
+### Version 2.0 Highlights
+
+- New FootPrints page with interactive map (tkintermapview) and AOI bbox overlay
+- Microsoft download + optional division, Google CSV/tile ID handling with division
+- Unified Extraction button with Microsoft/Google switch and extra fields option
+- Standardized footprints paths under `root/footprints/...` with clear Google tiles source
+- Robust error handling with suggestions and cancellable long operations
 
 ### Version 1.5 Enhancements
 
@@ -41,7 +49,7 @@ A powerful Python application for generating and managing building footprints fo
 ### Dependencies
 
 ```bash
-pip install tkinter customtkinter numpy pandas geopandas matplotlib
+pip install tkinter customtkinter tkintermapview numpy pandas geopandas matplotlib tqdm
 pip install shapely rtree pathlib lxml pillow
 ```
 
@@ -69,6 +77,13 @@ pip install shapely rtree pathlib lxml pillow
 3. **Configure Settings**: Set generation parameters and filters
 4. **Generate Buildings**: Create building layouts with collision detection
 5. **Export Results**: Save as GeoJSON or inject directly into BMS
+
+### FootPrints (new) — Quick Path
+1. Open FootPrints page
+2. Enter AOI coordinates and click “Update BBox”
+3. For Microsoft: type country, choose Divide (optional), Download
+4. For Google: enter tile ID or Browse a CSV, Divide (optional)
+5. In Saving: pick Microsoft/Google, set filename/folder, click “Extraction”
 
 ### First Time Setup
 
@@ -104,6 +119,7 @@ pip install shapely rtree pathlib lxml pillow
 ```
 Building Generator/
 ├── MainGui.py              # Main application entry point
+├── building_extractor.py   # Core footprints algorithms (MS/Google extract & divide)
 ├── bms_injector.py         # BMS injection functionality
 ├── MainCode.py             # Core business logic
 ├── components/             # Modular components
@@ -122,6 +138,13 @@ Building Generator/
 │   └── ...
 ├── docs/                   # Documentation
 ├── Assets/                 # UI assets and icons
+├── footprints/             # Standardized footprints root
+│   ├── microsoft/
+│   │   └── <country>/      # Divided chunks or <country>.geojson
+│   └── google/
+│       ├── tiles.geojson   # Required for Google division
+│       └── <tile_id>/
+│           └── <tile_id>_chunks/  # Divided Google chunks
 └── Generated/             # Output directory
 ```
 
