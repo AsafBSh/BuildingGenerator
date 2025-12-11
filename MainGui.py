@@ -19,6 +19,12 @@ import traceback
 import math
 import logging
 from utils.json_path_handler import load_json, save_json, JsonFiles, get_json_path
+
+# For GlobalAtlas WFS error handling
+try:
+    import requests
+except ImportError:
+    requests = None
 # Import enhanced settings window
 from components.settings_window import SettingsWindow
 
@@ -107,7 +113,7 @@ class MainPage(tk.Tk):
             frame.grid(row=0, column=0, sticky="nsew")
 
         # Set Name and Icon and version
-        self.shared_data["BuildingGeneratorVer"].set("Building Generator v2.0")
+        self.shared_data["BuildingGeneratorVer"].set("Building Generator v2.2")
         self.title(self.shared_data["BuildingGeneratorVer"].get())
         self.iconbitmap("Assets/icon_128.ico")
 
@@ -4760,8 +4766,8 @@ class OperationPage(tk.Frame):
             LoadedBMSModels = self.controller.shared_data["BMS_Databse"]
             # Build display set: include all fitted Geo features plus extra from full set up to 256
             try:
-                all_geo = self.controller.shared_data["Geodata"]
-                all_calc = self.controller.shared_data["Calc_Geodata"]
+                all_geo = self.controller.shared_data.get("Geodata")
+                all_calc = self.controller.shared_data.get("Calc_Geodata")
                 fitted_geo = self.Filltered_GeoFeatures if hasattr(self, 'Filltered_GeoFeatures') else None
                 # Use user-configured limit (10-1000), default 256
                 cfg_limit = 256
@@ -4776,9 +4782,20 @@ class OperationPage(tk.Frame):
                 extra_idx = [i for i in all_geo.index if i not in fitted_idx][:extra_needed]
                 display_idx = fitted_idx + extra_idx
                 geo_display = all_geo.loc[display_idx] if allowed > 0 else fitted_geo
-                calc_display = all_calc.loc[display_idx].values if allowed > 0 else self.Filltered_Calc_GeoFeatures
-            except Exception:
+                calc_display = all_calc.loc[display_idx].values if allowed > 0 and hasattr(self, 'Filltered_Calc_GeoFeatures') else (self.Filltered_Calc_GeoFeatures if hasattr(self, 'Filltered_Calc_GeoFeatures') else None)
+            except Exception as e:
                 # Fallback to previous filtered data on any issue
+                # Check if filtered data exists before using it
+                if not hasattr(self, 'Filltered_GeoFeatures') or not hasattr(self, 'Filltered_Calc_GeoFeatures'):
+                    # No data available at all, show warning and return
+                    import logging
+                    logging.warning(f"Cannot show map: No geodata available (error: {e})")
+                    messagebox.showwarning(
+                        "No Data Available",
+                        "Cannot display map because no geodata has been loaded or generated yet.\n\n"
+                        "Please load geodata from the GeoData page first."
+                    )
+                    return
                 geo_display = self.Filltered_GeoFeatures
                 calc_display = self.Filltered_Calc_GeoFeatures
             if Dimension == "2D":
@@ -4971,6 +4988,34 @@ class OperationPage(tk.Frame):
 
         generating_method = self.segemented_button.get()
         saving_method = self.saving_method_var.get()
+        
+        # Validate incompatible combinations of generation method and graph display options
+        # Get selected graph options from both segmented buttons
+        graph_option_1 = self.segemented_button_graphing1.get()
+        graph_option_2 = self.segemented_button_graphing2.get()
+        
+        # Check if Random Selection is combined with Geo-based graph options
+        if generating_method == "Random Selection":
+            # List of graph options that require GeoData
+            geo_graph_options = ["2D Geo", "3D Geo", "2D Both", "3D Both"]
+            
+            # Check if any geo-based graph option is selected
+            selected_geo_graph = (graph_option_1 in geo_graph_options) or (graph_option_2 in geo_graph_options)
+            
+            if selected_geo_graph:
+                logger.warning(f"Invalid combination detected: Random Selection with {graph_option_1 or graph_option_2}")
+                messagebox.showerror(
+                    "Invalid Configuration",
+                    "Random Selection cannot be used with geodata-based graph options.\n\n"
+                    f"Current selection:\n"
+                    f"• Generation Method: {generating_method}\n"
+                    f"• Graph Display: {graph_option_1 or graph_option_2}\n\n"
+                    "Please either:\n"
+                    "1. Switch to 'GeoJson' method\n"
+                    "2. Select '2D Fit', '3D Fit' for graph display\n"
+                    "3. Remove Graph display options"
+                )
+                return  # Abort generation
         
         # Make CT path from shared_data available to MainCode
         import MainCode
@@ -6278,34 +6323,18 @@ class FootPrintsPage(tk.Frame):
         self.fp_bottom_right_entry.bind("<FocusOut>", lambda e: self._on_update_bbox())
         self.fp_bottom_right_entry.bind("<Return>", lambda e: self._on_update_bbox())
 
-        # Map region: try to use tkintermapview; fallback to matplotlib
+        # Map region: initialize tkintermapview (show specific errors if it fails)
         self.canvas.create_text(250.0, 180.0, anchor="nw", text="Area of Interest Map", fill="#000000", font=("Inter", 14 * -1))
         self._map_mode = None
         self._bbox_polygon = None
         try:
             from tkintermapview import TkinterMapView  # type: ignore
-            self.map_widget = TkinterMapView(self, corner_radius=0)
-            self.map_widget.place(x=247.0, y=200.0, width=847.0, height=290.0)
-            self.map_widget.set_zoom(5)
-            self.map_widget.set_position(31.0, 34.8)  # default center
-            self._map_mode = "tkmap"
-            
-            # Tile source selector (OSM/Google)
-            try:
-                self.tile_source_var = tk.StringVar(value="Google Road")
-                self.tile_source_menu = Ctk.CTkOptionMenu(self, width=130, height=18, fg_color="#D5E3F0", text_color="#565454", variable=self.tile_source_var, values=["Google Road", "Google Satellite", "Google Hybrid", "Google Terrain", "OSM"], command=lambda s: self._set_map_tile_source(s))
-                self.tile_source_menu.place(x=963, y=180)
-            except Exception:
-                pass
-            # Default to Google Road tiles if allowed
-            self._set_map_tile_source("Google Road")
-            # Enable fit button for tkmap once bbox valid
-            self.fp_fit_btn.configure(state="disabled")
-            self.fp_fit_btn.configure(command=self._fit_map_to_bbox)
-        except Exception:
-            # No fallback: require tkintermapview
+        except Exception as e:
+            # tkintermapview not importable → show install hint
             self._map_mode = "missing"
             try:
+                import logging as _logging
+                _logging.getLogger(__name__).error(f"tkintermapview import failed: {e}")
                 self.map_hint = Ctk.CTkLabel(self, text="Interactive map unavailable. Install: pip install tkintermapview", bg_color="#F8F9FB", text_color="#565454")
                 self.map_hint.place(x=250, y=470)
                 self.map_install_btn = Ctk.CTkButton(self, text="Install Map Support", fg_color="#8DBBE7", width=150, height=20, command=self._install_map_support)
@@ -6313,6 +6342,37 @@ class FootPrintsPage(tk.Frame):
                 self.fp_fit_btn.configure(state="disabled")
             except Exception:
                 pass
+        else:
+            try:
+                self.map_widget = TkinterMapView(self, corner_radius=0)
+                self.map_widget.place(x=247.0, y=200.0, width=847.0, height=290.0)
+                self.map_widget.set_zoom(5)
+                self.map_widget.set_position(31.0, 34.8)  # default center
+                self._map_mode = "tkmap"
+
+                # Tile source selector (OSM/Google)
+                try:
+                    self.tile_source_var = tk.StringVar(value="Google Road")
+                    self.tile_source_menu = Ctk.CTkOptionMenu(self, width=130, height=18, fg_color="#D5E3F0", text_color="#565454", variable=self.tile_source_var, values=["Google Road", "Google Satellite", "Google Hybrid", "Google Terrain", "OSM"], command=lambda s: self._set_map_tile_source(s))
+                    self.tile_source_menu.place(x=963, y=180)
+                except Exception:
+                    pass
+                # Default to Google Road tiles if allowed
+                self._set_map_tile_source("Google Road")
+                # Enable fit button for tkmap once bbox valid
+                self.fp_fit_btn.configure(state="disabled")
+                self.fp_fit_btn.configure(command=self._fit_map_to_bbox)
+            except Exception as e:
+                # Map failed to initialize for another reason; surface error in UI
+                self._map_mode = "missing"
+                try:
+                    import logging as _logging
+                    _logging.getLogger(__name__).error(f"Failed to initialize map widget: {e}")
+                    self.map_hint = Ctk.CTkLabel(self, text=f"Map error: {e}", bg_color="#F8F9FB", text_color="#565454")
+                    self.map_hint.place(x=250, y=470)
+                    self.fp_fit_btn.configure(state="disabled")
+                except Exception:
+                    pass
 
         # Microsoft panel (left) with image banner
         try:
@@ -6369,12 +6429,12 @@ class FootPrintsPage(tk.Frame):
         try:
             self.extract_source = Ctk.CTkSegmentedButton(
                 self,
-                values=["Microsoft", "Google"],
+                values=["Microsoft", "Google", "Atlas"],
                 fg_color="#D5E3F0",
                 unselected_color="#D5E3F0",
                 selected_color="#8DBBE7",
                 height=20,
-                width=160,
+                width=170,
                 text_color="#565454",
                 dynamic_resizing=False,
             )
@@ -6413,6 +6473,8 @@ class FootPrintsPage(tk.Frame):
             if not loc:
                 loc = "default"
             out = os.path.join(root, "microsoft", loc)
+        elif provider == "globalatlas":
+            out = os.path.join(root, "globalatlas")
         else:
             out = os.path.join(root, "google")
         try:
@@ -6441,6 +6503,21 @@ class FootPrintsPage(tk.Frame):
         if not name.lower().endswith(".geojson"):
             name += ".geojson"
         return os.path.join(folder, name)
+
+    def _confirm_file_overwrite(self, output_file):
+        """
+        Check if output file already exists and prompt user to confirm overwrite.
+        
+        Returns:
+            True if file doesn't exist OR user confirms overwrite
+            False if user cancels the operation
+        """
+        if os.path.exists(output_file):
+            return messagebox.askyesno(
+                "File Already Exists",
+                f"The file already exists:\n{output_file}\n\nDo you want to overwrite it?"
+            )
+        return True
 
     def _fp_browse_save(self):
         try:
@@ -6522,6 +6599,11 @@ class FootPrintsPage(tk.Frame):
             logging.getLogger(__name__).error(f"Microsoft dataset not found: {location}")
             return messagebox.showerror("Not Found", f"No dataset found for '{location}' under footprints/microsoft.")
         output_file = self._compose_output_file("microsoft")
+        
+        # Check if file exists and confirm overwrite
+        if not self._confirm_file_overwrite(output_file):
+            return
+        
         extrafields = bool(self.fp_extrafields.get())
         tl = [float(self.fp_top_left[0]), float(self.fp_top_left[1])]
         br = [float(self.fp_bottom_right[0]), float(self.fp_bottom_right[1])]
@@ -6647,6 +6729,11 @@ class FootPrintsPage(tk.Frame):
             logging.getLogger(__name__).error("Google dataset not found")
             return messagebox.showerror("Not Found", "No Google dataset found. Browse a CSV or enter a dataset/tile name present in footprints/google.")
         output_file = self._compose_output_file("google")
+        
+        # Check if file exists and confirm overwrite
+        if not self._confirm_file_overwrite(output_file):
+            return
+        
         extrafields = bool(self.fp_extrafields.get())
         tl = (float(self.fp_top_left[0]), float(self.fp_top_left[1]))
         br = (float(self.fp_bottom_right[0]), float(self.fp_bottom_right[1]))
@@ -6671,6 +6758,169 @@ class FootPrintsPage(tk.Frame):
                 messagebox.showinfo("Extraction Completed", f"Saved AOI to:\n{output_file}\nBuildings extracted: {count}")
             else:
                 messagebox.showinfo("Extraction Completed", f"Saved AOI to:\n{output_file}")
+
+    def _ga_extract(self):
+        """Extract buildings from GlobalBuildingAtlas WFS service."""
+        logger = logging.getLogger(__name__)
+        
+        # Validate coordinates
+        if not (self.fp_top_left and self.fp_bottom_right):
+            logger.warning("GlobalAtlas extraction attempted without valid BBox")
+            return messagebox.showwarning("Invalid BBox", "Please enter valid coordinates and update BBox.")
+        
+        # Prepare extraction parameters
+        output_file = self._compose_output_file("globalatlas")
+        
+        # Check if file exists and confirm overwrite
+        if not self._confirm_file_overwrite(output_file):
+            return
+        
+        extrafields = bool(self.fp_extrafields.get())
+        tl = (float(self.fp_top_left[0]), float(self.fp_top_left[1]))
+        br = (float(self.fp_bottom_right[0]), float(self.fp_bottom_right[1]))
+        
+        logger.info(f"Starting GlobalAtlas extraction:")
+        logger.info(f"  Top-left: {tl}")
+        logger.info(f"  Bottom-right: {br}")
+        logger.info(f"  Output file: {output_file}")
+        logger.info(f"  Extra OSM fields: {extrafields}")
+        logger.debug(f"  WFS Service: https://tubvsig-so2sat-vm1.srv.mwn.de/geoserver/ows?")
+        logger.debug(f"  Layer: global3D:lod1_global")
+        
+        # Import processing window
+        try:
+            from processing_window import run_with_processing
+        except Exception as e:
+            logger.error(f"Processing window not available: {e}")
+            return messagebox.showerror("Error", f"Processing window not available: {e}")
+        
+        # Define extraction task
+        def task(win):
+            try:
+                logger.debug("Importing global_atlas_extractor module from components")
+                from components.global_atlas_extractor import extract_globalatlas_buildings
+                
+                logger.info("Calling extract_globalatlas_buildings...")
+                result = extract_globalatlas_buildings(tl, br, output_file, extrafields)
+                
+                logger.debug(f"Extraction result: {result}")
+                return result
+                
+            except ImportError as e:
+                logger.error(f"Failed to import global_atlas_extractor: {e}", exc_info=True)
+                raise Exception(f"GlobalAtlas integration module not found: {e}")
+            except Exception as e:
+                logger.error(f"GlobalAtlas extract error: {e}", exc_info=True)
+                raise
+        
+        # Run extraction with progress window
+        try:
+            logger.info("Launching processing window...")
+            res = run_with_processing(
+                parent=self.controller, 
+                task_function=task, 
+                title="GlobalAtlas Extract", 
+                message="Fetching buildings from GlobalAtlas...\n\nPlease wait (30-120 seconds)"
+            )
+            
+            logger.debug(f"Processing window returned: {res}")
+            
+            # Handle results - check if res is a valid dict
+            if res is None or res is False:
+                logger.warning(f"Extraction failed or returned invalid result: {res}")
+                messagebox.showwarning(
+                    "Extraction Failed", 
+                    "Extraction failed to complete.\n\n"
+                    "The GlobalBuildingAtlas service may be experiencing\n"
+                    "high traffic or connection issues.\n\n"
+                    "Please try:\n"
+                    "  • Smaller bounding box\n"
+                    "  • Retry in a few minutes\n"
+                    "  • Use Microsoft/Google sources"
+                )
+                return
+            
+            # Ensure res is a dictionary before calling .get()
+            if not isinstance(res, dict):
+                logger.error(f"Unexpected result type: {type(res)} - expected dict")
+                messagebox.showerror(
+                    "Extraction Error",
+                    "Extraction returned unexpected result format.\n"
+                    "Check logs for details."
+                )
+                return
+            
+            if res.get('cancelled', False):
+                logger.info("Extraction was cancelled by user")
+                messagebox.showinfo("Cancelled", "Extraction was cancelled.")
+                return
+            
+            # Success case
+            count = res.get("count", 0)
+            total_available = res.get("total_available")
+            
+            logger.info(f"GlobalAtlas extraction completed successfully:")
+            logger.info(f"  Output file: {output_file}")
+            logger.info(f"  Buildings extracted: {count}")
+            if total_available:
+                logger.info(f"  Total available in area: {total_available}")
+            
+            # Build success message
+            msg = f"Saved AOI to:\n{output_file}\n\nBuildings extracted: {count}"
+            
+            if count == 0:
+                msg += "\n\n⚠️ No buildings found in the specified area."
+                msg += "\nTry expanding your bounding box or checking coordinates."
+                messagebox.showwarning("No Buildings Found", msg)
+            else:
+                if total_available and total_available > count:
+                    msg += f"\nTotal available in area: {total_available}"
+                    if total_available > count:
+                        msg += f"\n\n(Showing {count} of {total_available} buildings)"
+
+                messagebox.showinfo("Extraction Completed", msg)
+                
+        except Exception as e:
+            # Handle requests-specific exceptions if requests is available
+            if requests and isinstance(e, requests.exceptions.Timeout):
+                logger.error(f"WFS request timed out: {e}")
+                messagebox.showerror(
+                    "Service Timeout", 
+                    "GlobalBuildingAtlas WFS service request timed out.\n\n"
+                    "The service may be experiencing high traffic.\n"
+                    "Please try:\n"
+                    "  • Smaller bounding box\n"
+                    "  • Retry in a few minutes\n"
+                    "  • Use Microsoft/Google sources instead"
+                )
+            elif requests and isinstance(e, requests.exceptions.RequestException):
+                logger.error(f"WFS request failed: {e}", exc_info=True)
+                error_msg = str(e)
+                if "high traffic" in error_msg.lower() or "incompleteread" in error_msg.lower():
+                    messagebox.showerror(
+                        "Service Unavailable", 
+                        "GlobalBuildingAtlas WFS service connection was interrupted.\n\n"
+                        "The service may be experiencing high traffic or instability.\n\n"
+                        "Please try:\n"
+                        "  • Retry in a few minutes\n"
+                        "  • Smaller bounding box\n"
+                        "  • Use Microsoft/Google sources instead"
+                    )
+                else:
+                    messagebox.showerror(
+                        "Connection Error", 
+                        f"Failed to connect to GlobalBuildingAtlas WFS:\n\n{error_msg}\n\n"
+                        "Check your internet connection and try again."
+                    )
+            else:
+                # Generic error handling for non-requests exceptions
+                logger.error(f"Unexpected error during GlobalAtlas extraction: {e}", exc_info=True)
+                error_msg = str(e)
+                messagebox.showerror(
+                    "Extraction Error", 
+                    f"Failed to extract from GlobalAtlas:\n\n{error_msg}\n\n"
+                    "Check logs for more details."
+                )
 
     def _resolve_ms_input(self, location):
         from building_extractor import resolve_ms_input
@@ -6775,13 +7025,15 @@ class FootPrintsPage(tk.Frame):
             messagebox.showerror("Installation Error", f"Failed to install tkintermapview.\nYou can install manually:\npython -m pip install tkintermapview\nError: {e}")
 
     def _run_extraction(self):
-        """Run extraction based on selector (Microsoft/Google) using saving options."""
+        """Run extraction based on selector (Microsoft/Google/GlobalAtlas) using saving options."""
         try:
             source = self.extract_source.get() if self.extract_source else "Google"
         except Exception:
             source = "Google"
         if source == "Microsoft":
             return self._ms_extract()
+        elif source == "Atlas":
+            return self._ga_extract()
         else:
             return self._gg_extract()
 

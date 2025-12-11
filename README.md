@@ -1,4 +1,4 @@
-# Building Generator v2.0
+# Building Generator v2.2
 
 A powerful Python application for generating and managing building footprints for Falcon BMS simulation environments. This tool processes geospatial data from various sources and generates buildings compatible with Falcon BMS theaters.
 
@@ -19,6 +19,13 @@ A powerful Python application for generating and managing building footprints fo
 - **Batch Processing**: Process multiple datasets efficiently
 - **Backup Management**: Automatic backup of original BMS files
 - **Real-time Preview**: 2D and 3D visualization of generated buildings
+
+### Version 2.2 Highlights
+- GlobalBuildingAtlas Integration
+    - Added support for GlobalBuildingAtlas WFS service (LoD1 building data)
+    - New data source option in FootPrintsPage alongside Microsoft and Google
+    - Robust Connection Handling for GlobalAtlas
+- BMS Injection fixes
 
 ### Version 2.0 Highlights
 
@@ -92,27 +99,6 @@ pip install shapely rtree pathlib lxml pillow
 3. Select your BMS installation directory
 4. Load a sample GeoJSON file to test functionality
 
-## 🎯 Key Improvements from v1.0 to v1.5
-
-### Architecture Overhaul
-
-- **Modular Design**: Separated functionality into components and utilities
-- **Clean Separation**: UI, logic, and data handling are now properly separated
-- **Extensible Framework**: Easy to add new features and data sources
-
-### User Experience
-
-- **Enhanced Settings**: Tabbed interface with better organization
-- **BMS Integration**: Direct injection capabilities with template management
-- **Improved Feedback**: Better error handling and user notifications
-- **Processing Windows**: Long-running operations with progress indicators
-
-### Technical Improvements
-
-- **Performance**: Background processing and caching for large datasets
-- **Reliability**: Comprehensive error handling and data validation
-- **Maintainability**: Clean code structure with proper documentation
-- **Logging**: Configurable logging system for debugging and monitoring
 
 ## 📁 Project Structure
 
